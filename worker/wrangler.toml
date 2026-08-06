@@ -1,0 +1,9 @@
+name = "voice-lab-token-minter"
+main = "index.js"
+compatibility_date = "2026-08-05"
+
+[vars]
+LLM_MODEL = "anthropic/claude-haiku-4.5"
+# Кто имеет право дёргать Worker из браузера. Прод-фронт на GitHub Pages
+# плюс локальная разработка. Origin — со схемой и без хвостового слеша.
+ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http://127.0.0.1:5173"
