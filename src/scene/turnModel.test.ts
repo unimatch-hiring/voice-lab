@@ -63,6 +63,19 @@ test("counts tokens and tracks the latest audio level", () => {
   expect(m.level).toBeCloseTo(0.4);
 });
 
+test("activeStage reports the most recently started of several open stages", () => {
+  const m = new TurnModel();
+  m.apply({ type: "stage-start", stage: "llm", at: 100 });
+  m.apply({ type: "stage-start", stage: "tts", at: 300 }); // начался до конца llm
+  m.apply({ type: "stage-start", stage: "playback", at: 450 }); // и до конца tts
+
+  expect(m.activeStage).toBe("playback");
+
+  // Закрылась самая поздняя — активной становится предыдущая по времени старта.
+  m.apply({ type: "stage-end", stage: "playback", at: 500, ttfbMs: 50 });
+  expect(m.activeStage).toBe("tts");
+});
+
 test("reset clears everything", () => {
   const m = new TurnModel();
   m.apply({ type: "stage-start", stage: "stt", at: 0 });
