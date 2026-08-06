@@ -70,3 +70,23 @@ test("skips frames that carry no audio", async () => {
 
   expect(out).toHaveLength(0);
 });
+
+test("skips a final frame that carries alignment but no audio", async () => {
+  const { factory } = fakeSocket([
+    {
+      audio: b64([1, 0]),
+      alignment: { chars: ["а"], charStartTimesMs: [0], charDurationsMs: [50] },
+    },
+    {
+      audio: null,
+      alignment: { chars: ["!"], charStartTimesMs: [50], charDurationsMs: [10] },
+    },
+    { isFinal: true },
+  ]);
+
+  const out = [];
+  for await (const c of synthesize("а!", { transport, socketFactory: factory })) out.push(c);
+
+  expect(out).toHaveLength(1);
+  expect(out[0].chars).toEqual(["а"]);
+});
