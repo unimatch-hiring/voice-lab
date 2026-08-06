@@ -118,3 +118,42 @@ test("reset clears history and timeline between sessions", async () => {
   expect(orch.history).toEqual([]);
   expect(orch.timeline.totalMs).toBe(0);
 });
+
+test("tts-chunk carries the chunk start in absolute phrase time", async () => {
+  const { seen, deps } = harness({
+    synthesize: vi.fn(async function* (_text: string) {
+      yield {
+        audio: new Int16Array(16),
+        chars: ["п", "р"],
+        charStartTimesMs: [0, 50],
+        charDurationsMs: [50, 50],
+      };
+      yield {
+        audio: new Int16Array(16),
+        chars: ["и"],
+        charStartTimesMs: [0],
+        charDurationsMs: [80],
+      };
+    }),
+  });
+  const orch = new Orchestrator(deps as never);
+
+  await orch.runTurn(new Blob(["x"]));
+
+  const offsets = seen
+    .filter((e) => e.type === "tts-chunk")
+    .map((e) => (e as { offsetMs: number }).offsetMs);
+
+  expect(offsets).toEqual([0, 100]);
+});
+
+test("each turn starts with a fresh mouth timeline", async () => {
+  const { deps } = harness();
+  const orch = new Orchestrator(deps as never);
+
+  await orch.runTurn(new Blob(["x"]));
+  const afterFirst = orch.timeline.totalMs;
+  await orch.runTurn(new Blob(["x"]));
+
+  expect(orch.timeline.totalMs).toBe(afterFirst);
+});
