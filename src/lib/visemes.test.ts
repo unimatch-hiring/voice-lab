@@ -18,6 +18,9 @@ test("maps latin and cyrillic vowels to viseme shapes", () => {
   expect(charToViseme("б")).toBe("MBP");
   expect(charToViseme("f")).toBe("FV");
   expect(charToViseme(" ")).toBe("rest");
+  expect(charToViseme("ё")).toBe("O");
+  expect(charToViseme("э")).toBe("E");
+  expect(charToViseme("в")).toBe("FV");
 });
 
 test("reads the viseme active at a given moment", () => {
