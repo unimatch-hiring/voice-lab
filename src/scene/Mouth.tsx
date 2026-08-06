@@ -2,17 +2,21 @@ import { useEffect, useRef } from "react";
 import type { Viseme, VisemeTimeline } from "../lib/visemes";
 import type { PlaybackLike } from "../lib/pipeline/orchestrator";
 
-/** 8 форм Preston Blair плюс покой. Координаты в системе 100×60. */
-export const MOUTH_SHAPES: Record<Viseme, string> = {
-  rest: "M20,30 Q50,34 80,30 Q50,36 20,30 Z",
-  MBP:  "M20,30 Q50,32 80,30 Q50,33 20,30 Z",
-  AI:   "M22,26 Q50,14 78,26 Q50,52 22,26 Z",
-  E:    "M20,28 Q50,20 80,28 Q50,40 20,28 Z",
-  O:    "M34,30 Q50,16 66,30 Q50,46 34,30 Z",
-  U:    "M40,30 Q50,22 60,30 Q50,40 40,30 Z",
-  FV:   "M22,31 Q50,25 78,31 Q50,35 22,31 Z",
-  L:    "M24,28 Q50,22 76,28 Q50,42 24,28 Z",
-  WQ:   "M38,30 Q50,20 62,30 Q50,42 38,30 Z",
+const VISEMES: readonly Viseme[] = [
+  "rest", "MBP", "AI", "E", "O", "U", "FV", "L", "WQ",
+];
+
+/** Кадр персонажа на визиму. Спрайты лежат в public/face/. */
+export const MOUTH_SPRITES: Record<Viseme, string> = {
+  rest: "face/rest.png",
+  MBP: "face/MBP.png",
+  AI: "face/AI.png",
+  E: "face/E.png",
+  O: "face/O.png",
+  U: "face/U.png",
+  FV: "face/FV.png",
+  L: "face/L.png",
+  WQ: "face/WQ.png",
 };
 
 export function Mouth({
@@ -22,21 +26,28 @@ export function Mouth({
   timeline: VisemeTimeline;
   playback: PlaybackLike;
 }) {
-  const pathRef = useRef<SVGPathElement>(null);
+  const frames = useRef(new Map<Viseme, HTMLImageElement>());
 
   useEffect(() => {
     let raf = 0;
-    let current: Viseme | null = null;
+    // Стартовое значение — тот кадр, что реально виден в разметке, иначе первое
+    // переключение не погасит его и на экране окажутся два кадра сразу.
+    let current: Viseme = "rest";
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
       // Единственный источник времени — плейхед аудио. Свой таймер здесь
       // означал бы две независимые шкалы и гарантированный расход.
       const viseme = timeline.at(playback.elapsedMs);
-      if (viseme !== current) {
-        current = viseme;
-        pathRef.current?.setAttribute("d", MOUTH_SHAPES[viseme]);
-      }
+      if (viseme === current) return;
+
+      // Показ через visibility, а не через смену src: все кадры уже в DOM,
+      // поэтому переключение не ждёт сети и не моргает на первом показе.
+      const prev = frames.current.get(current);
+      if (prev) prev.style.opacity = "0";
+      const next = frames.current.get(viseme);
+      if (next) next.style.opacity = "1";
+      current = viseme;
     };
 
     raf = requestAnimationFrame(tick);
@@ -44,13 +55,30 @@ export function Mouth({
   }, [timeline, playback]);
 
   return (
-    <svg viewBox="0 0 100 60" width="120" height="72" aria-label="Артикуляция ответа">
-      <path
-        ref={pathRef}
-        d={MOUTH_SHAPES.rest}
-        fill="var(--ink, #10151c)"
-        style={{ transition: "d 40ms linear" }}
-      />
-    </svg>
+    <div
+      style={{ position: "relative", width: 160, height: 160 }}
+      aria-label="Артикуляция ответа"
+    >
+      {VISEMES.map((v) => (
+        <img
+          key={v}
+          ref={(el) => {
+            if (el) frames.current.set(v, el);
+            else frames.current.delete(v);
+          }}
+          src={`${import.meta.env.BASE_URL}${MOUTH_SPRITES[v]}`}
+          alt=""
+          draggable={false}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            opacity: v === "rest" ? 1 : 0,
+            userSelect: "none",
+          }}
+        />
+      ))}
+    </div>
   );
 }
