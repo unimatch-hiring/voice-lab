@@ -49,6 +49,15 @@ test("a gap between chunks does not desync later chunks", () => {
   expect(t.at(150)).toBe("O");
 });
 
+test("chunk offset uses the latest-ending char, not the last char in order", () => {
+  const t = new VisemeTimeline();
+  t.append(chunk(["a", "b", "c"], [0, 50, 60], [50, 200, 20]));
+  t.append(chunk(["o"], [0], [100]));
+
+  expect(t.totalMs).toBe(350);
+  expect(t.at(300)).toBe("O");
+});
+
 test("reset clears accumulated offset", () => {
   const t = new VisemeTimeline();
   t.append(chunk(["m"], [0], [100]));
