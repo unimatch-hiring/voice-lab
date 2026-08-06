@@ -43,6 +43,16 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
       const decoder = new TextDecoder();
       let buffer = "";
 
+      // null = не кадр данных, "done" = конец стрима, иначе — токен.
+      const parseFrame = (frame: string): string | null | "done" => {
+        const line = frame.trim();
+        if (!line.startsWith("data:")) return null;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") return "done";
+        const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+        return delta ? (delta as string) : null;
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -53,14 +63,15 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
         buffer = frames.pop() ?? "";
 
         for (const frame of frames) {
-          const line = frame.trim();
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") return;
-          const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-          if (delta) yield delta as string;
+          const parsed = parseFrame(frame);
+          if (parsed === "done") return;
+          if (parsed) yield parsed;
         }
       }
+
+      // Стрим мог оборваться без [DONE] и без завершающего \n\n — разобрать хвост буфера тем же способом.
+      const tail = parseFrame(buffer);
+      if (tail && tail !== "done") yield tail;
     },
   };
 }

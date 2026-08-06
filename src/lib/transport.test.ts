@@ -55,6 +55,20 @@ function chunkedResponse(body: string, cutAt: number): Response {
   );
 }
 
+test("llmStream yields the last token even when the stream ends without [DONE] or a trailing blank line", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"При"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"вет"}}]}', // обрыв: нет \n\n и нет [DONE]
+  ].join("");
+  const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }));
+  const t = createTransport(cfg, fetchMock);
+
+  const out: string[] = [];
+  for await (const token of t.llmStream([{ role: "user", content: "hi" }])) out.push(token);
+
+  expect(out).toEqual(["При", "вет"]);
+});
+
 test("llmStream reassembles an SSE frame split across two stream chunks", async () => {
   const sse = [
     'data: {"choices":[{"delta":{"content":"При"}}]}\n\n',

@@ -95,9 +95,7 @@ export function App() {
       </button>
 
       {error && (
-        <p style={{ color: "var(--fail)", fontSize: 13 }}>
-          {error} — конвейер переключён на фикстуры, собес продолжается.
-        </p>
+        <p style={{ color: "var(--fail)", fontSize: 13 }}>{error}</p>
       )}
 
       <div style={{ marginTop: 24 }}>

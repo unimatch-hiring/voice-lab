@@ -44,6 +44,23 @@ test("prune drops spans that scrolled out of the window", () => {
   expect(m.visible(10_000, 6000).map((s) => s.stage)).toEqual(["llm"]);
 });
 
+test("prune actually shrinks the span store, not just the visible slice", () => {
+  const m = new TurnModel();
+
+  // 300 давно закрытых спанов — все за пределами окна.
+  for (let i = 0; i < 300; i++) {
+    m.apply({ type: "stage-start", stage: "stt", at: i * 10 });
+    m.apply({ type: "stage-end", stage: "stt", at: i * 10 + 5, ttfbMs: 5 });
+  }
+
+  const before = (m as unknown as { spans: unknown[] }).spans.length;
+  m.prune(1_000_000, 6000);
+  const after = (m as unknown as { spans: unknown[] }).spans.length;
+
+  expect(before).toBe(300);
+  expect(after).toBe(0);
+});
+
 test("prune keeps a still-open span even if it started long ago", () => {
   const m = new TurnModel();
   m.apply({ type: "stage-start", stage: "playback", at: 0 });
