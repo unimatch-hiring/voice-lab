@@ -42,3 +42,11 @@ test("reset returns the detector to the idle state", () => {
 
   expect(vad.push(loud())).toBe("speech-start");
 });
+
+test("silence before any speech never reports speech-end", () => {
+  const vad = new EnergyVad({ threshold: 0.1, hangoverFrames: 2 });
+
+  expect(vad.push(quiet())).toBeNull();
+  expect(vad.push(quiet())).toBeNull();
+  expect(vad.push(quiet())).toBeNull();
+});
