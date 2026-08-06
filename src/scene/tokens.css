@@ -1,0 +1,56 @@
+:root {
+  --shield: #fbfcfd;
+  --ink: #10151c;
+  --running: #1a4fa0;
+  --ok: #1f7a5c;
+  --fail: #c2392b;
+
+  --scope-body: #14110c;
+  --scope-trace: #ffb454;
+  --scope-after: #7a4f1c;
+  --scope-fail: #ff6b4a;
+
+  --stage-capture: #4cc9f0;
+  --stage-vad: #4895ef;
+  --stage-stt: #4361ee;
+  --stage-llm: #7209b7;
+  --stage-tts: #b5179e;
+  --stage-playback: #f72585;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--shield);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+}
+
+.wf-canvas { width: 100%; display: block; border-radius: 6px; }
+
+.wf-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.wf-level {
+  position: relative;
+  width: 180px;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(16, 21, 28, 0.08);
+  overflow: hidden;
+}
+
+.wf-level-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--running);
+  will-change: transform;
+}
