@@ -37,3 +37,37 @@ test("llmStream yields tokens parsed out of the SSE body", async () => {
 
   expect(out).toEqual(["При", "вет"]);
 });
+
+// Стримом кадр может прийти разорванным между двумя read() — единственная
+// нетривиальная логика в модуле (перенос неполного хвоста в буфер).
+function chunkedResponse(body: string, cutAt: number): Response {
+  const enc = new TextEncoder();
+  const parts = [body.slice(0, cutAt), body.slice(cutAt)];
+  let i = 0;
+  return new Response(
+    new ReadableStream({
+      pull(controller) {
+        if (i < parts.length) controller.enqueue(enc.encode(parts[i++]));
+        else controller.close();
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+test("llmStream reassembles an SSE frame split across two stream chunks", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"При"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"вет"}}]}\n\n',
+    "data: [DONE]\n\n",
+  ].join("");
+  const cutAt = sse.indexOf('"вет"'); // разрез внутри второго кадра
+
+  const fetchMock = vi.fn().mockResolvedValue(chunkedResponse(sse, cutAt));
+  const t = createTransport(cfg, fetchMock);
+
+  const out: string[] = [];
+  for await (const token of t.llmStream([{ role: "user", content: "hi" }])) out.push(token);
+
+  expect(out).toEqual(["При", "вет"]);
+});
