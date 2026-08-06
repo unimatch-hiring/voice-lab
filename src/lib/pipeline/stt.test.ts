@@ -42,3 +42,19 @@ test("surfaces upstream failure as a readable error", async () => {
 
   await expect(transcribe(new Blob(["x"]), { transport, fetchImpl })).rejects.toThrow(/500/);
 });
+
+test("clamps confidence to 1 when the provider returns a non-negative logprob", async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        text: "да",
+        words: [{ text: "да", start: 0, end: 0.2, logprob: 0.5 }],
+      }),
+      { status: 200 },
+    ),
+  );
+
+  const out = await transcribe(new Blob(["x"]), { transport, fetchImpl });
+
+  expect(out.words[0].confidence).toBe(1);
+});
