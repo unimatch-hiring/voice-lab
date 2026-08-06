@@ -75,3 +75,27 @@ test("stop resets the queue so the next turn starts clean", () => {
   expect(started).toEqual([0, 3]);
   expect(q.elapsedMs).toBe(0);
 });
+
+test("elapsedMs keeps counting from the first chunk, not the latest one", () => {
+  const { ctx } = fakeContext(0);
+  const q = new PlaybackQueue(ctx as never);
+
+  q.enqueue(chunk(16000)); // стартует в 0, длится 1 c
+  ctx.currentTime = 0.5;
+  q.enqueue(chunk(16000)); // планируется на 1, но отсчёт идёт от первого
+
+  ctx.currentTime = 1.5;
+  expect(q.elapsedMs).toBe(1500);
+});
+
+test("stop clears the schedule so the next turn does not wait out the old one", () => {
+  const { ctx, started } = fakeContext(0);
+  const q = new PlaybackQueue(ctx as never);
+
+  q.enqueue(chunk(160000)); // длинный чанк: 10 c
+  ctx.currentTime = 2; // прервали на 2-й секунде
+  q.stop();
+  q.enqueue(chunk(16000));
+
+  expect(started).toEqual([0, 2]); // без сброса было бы [0, 10]
+});
