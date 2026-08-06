@@ -50,3 +50,28 @@ test("offline replies stream token by token, not in one lump", async () => {
   expect(tokens.length).toBeGreaterThan(1);
   expect(tokens.join("")).toBe(fixture.reply);
 });
+
+test("long text is split into several chunks", () => {
+  const long = FIXTURES.find((f) => f.reply.length > 40);
+  expect(long, "нужна фикстура с ответом длиннее одного чанка").toBeTruthy();
+  expect(long!.chunks.length).toBeGreaterThan(1);
+
+  // Тайминги внутри чанка отсчитываются от его начала.
+  for (const c of long!.chunks) {
+    expect(c.charStartTimesMs[0]).toBe(0);
+    expect(c.chars.length).toBe(c.charStartTimesMs.length);
+    expect(c.chars.length).toBe(c.charDurationsMs.length);
+  }
+});
+
+test("fixture transcripts carry word-level timings", () => {
+  for (const f of FIXTURES) {
+    expect(f.stt.words.length).toBeGreaterThan(0);
+    expect(f.stt.words.map((w) => w.text).join(" ")).toBe(f.stt.text);
+    for (const w of f.stt.words) {
+      expect(w.end).toBeGreaterThan(w.start);
+      expect(w.confidence).toBeGreaterThan(0);
+      expect(w.confidence).toBeLessThanOrEqual(1);
+    }
+  }
+});
