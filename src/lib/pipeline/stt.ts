@@ -16,8 +16,18 @@ function toConfidence(logprob: number | undefined): number {
   return Math.min(1, Math.max(0, Math.exp(logprob)));
 }
 
+/**
+ * Shortest recording Scribe will look at. Below this a tap instead of a press
+ * produces a near-empty container, and the API answers 400 "the uploaded file is
+ * empty or corrupted" — which is true but tells the user nothing.
+ */
+const MIN_AUDIO_BYTES = 1024;
+
 export async function transcribe(audio: Blob, deps: SttDeps): Promise<SttResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  if (audio.size < MIN_AUDIO_BYTES) {
+    throw new Error("Nothing was recorded — hold the button while you speak.");
+  }
   const token = await deps.transport.sttToken();
 
   const form = new FormData();
@@ -35,7 +45,18 @@ export async function transcribe(audio: Blob, deps: SttDeps): Promise<SttResult>
     method: "POST",
     body: form,
   });
-  if (!r.ok) throw new Error(`scribe failed: ${r.status}`);
+  if (!r.ok) {
+    // Pass the upstream reason through: a bare status code sends whoever hits this
+    // digging through network logs for what a sentence could have told them.
+    const detail = await r.text().catch(() => "");
+    let reason = "";
+    try {
+      reason = JSON.parse(detail)?.detail?.message ?? "";
+    } catch {
+      reason = detail.slice(0, 120);
+    }
+    throw new Error(reason ? `Transcription failed: ${reason}` : `Transcription failed (${r.status})`);
+  }
 
   const data = (await r.json()) as {
     text: string;

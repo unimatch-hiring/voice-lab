@@ -245,10 +245,13 @@ body {
   font-size: 13px;
 }
 
-.error {
+/* The row is always in the layout, visible only when there is something to say:
+   letting it appear pushed everything below it down by its own height mid-run. */
+.status-line {
   margin: 0;
-  color: var(--fail);
+  min-height: 20px;
   font-size: 13px;
+  color: var(--fail);
 }
 
 /* ── level meter ───────────────────────────────────────────────────────── */
@@ -291,20 +294,30 @@ body {
 
 .wf-canvas {
   width: 100%;
-  flex: 1;
   display: block;
   border-radius: 6px;
 }
 
 /* ── stage / character split ───────────────────────────────────────────── */
 
+/* Every block in the run has a FIXED height. Before this the panel grew and shrank
+   as content appeared — lanes, then a breakdown, then a longer conversation — and
+   the whole page jumped on each turn. Now content scrolls inside its box instead of
+   resizing the box. */
 .run {
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(200px, 27vw, 260px);
   gap: var(--gap);
-  /* Stretch, not start: the character column is taller than the plot, and with
-     `start` the difference showed up as dead space under the stage lanes. */
+  /* Stretch so the character column matches the left column's height — with `start`
+     the difference showed up as dead space beside the conversation. */
   align-items: stretch;
+}
+
+.run-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 
 @media (max-width: 720px) {
@@ -318,6 +331,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-self: start;
 }
 
 .mouth-frame figcaption {
@@ -357,76 +371,119 @@ body {
   user-select: none;
 }
 
-/* ── token setup ───────────────────────────────────────────────────────── */
+/* ── settings drawer ───────────────────────────────────────────────────── */
 
-/* Quiet, but not invisible. The first pass made the field's fill identical to the
-   page background and left the button transparent, so neither read as a control at
-   all. It gets its own surface instead, and the field sits lighter than the card it
-   is on so the input is legible as an input. */
-.setup {
+.settings {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
-  flex-wrap: wrap;
   padding: 14px 16px;
-  background: var(--panel);
-  border: 1px solid var(--edge);
-  border-radius: var(--radius);
+  background: var(--rack-sunken);
+  border-bottom: 1px solid var(--rack-edge);
+}
+
+.settings-state {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.settings-note {
+  font-family: var(--sans);
   font-size: 13px;
-  color: var(--ink-dim);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-.setup label {
-  color: var(--ink);
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 
-.setup input {
+.settings-form label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.settings-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-row input {
   appearance: none;
+  flex: 1;
+  min-width: 220px;
   font: 13px/1 var(--mono);
-  color: var(--ink);
-  background: var(--field);
-  border: 1px solid var(--field-edge);
+  color: var(--rack-ink);
+  background: var(--rack);
+  border: 1px solid var(--rack-edge);
   border-radius: 7px;
   padding: 10px 12px;
-  width: 250px;
   transition: border-color 120ms ease;
 }
 
-.setup input::placeholder {
-  color: var(--ink-dim);
-  opacity: 1;
-}
+.settings-row input::placeholder { color: var(--rack-dim); opacity: 1; }
 
-.setup input:hover { border-color: var(--ink-dim); }
-
-.setup input:focus {
+.settings-row input:focus {
   border-color: var(--running);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 22%, transparent);
 }
 
-/* Filled, not outlined. As a ghost button its label sat at 3.08 contrast in dark
-   mode — below the 4.5 floor, and it read as decoration rather than the control that
-   turns on live mode. */
-.setup button {
+.settings-row button {
   appearance: none;
   font: 600 13px/1 var(--sans);
   color: var(--on-accent);
   background: var(--running);
   border: 1px solid var(--running);
   border-radius: 7px;
-  padding: 10px 16px;
+  padding: 10px 18px;
   cursor: pointer;
   transition: filter 120ms ease;
 }
 
-.setup button:hover:not(:disabled) { filter: brightness(1.08); }
+.settings-row button:hover:not(:disabled) { filter: brightness(1.08); }
 
-.setup button:disabled {
+.settings-row button:disabled {
   cursor: default;
-  color: var(--ink-dim);
-  background: var(--field);
-  border-color: var(--field-edge);
+  color: var(--rack-dim);
+  background: var(--rack);
+  border-color: var(--rack-edge);
+}
+
+/* Says what it does, rather than leaving "turn off" to be guessed at. */
+.settings-secondary {
+  appearance: none;
+  align-self: flex-start;
+  font: 13px/1 var(--sans);
+  color: var(--rack-ink);
+  background: var(--rack);
+  border: 1px solid var(--rack-edge);
+  border-radius: 7px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.settings-secondary:hover { border-color: var(--fail); color: var(--fail); }
+
+.settings-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--rack-dim);
 }
 
 .linkish {
@@ -445,8 +502,13 @@ body {
 
 /* ── per-turn breakdown ────────────────────────────────────────────────── */
 
+/* Reserves the same height the filled breakdown occupies, so finishing a turn does
+   not shove everything below it down the page. */
 .breakdown-empty {
   margin: 0;
+  min-height: 122px;
+  display: flex;
+  align-items: flex-start;
   padding: 14px 0 4px;
   border-top: 1px solid var(--rack-edge);
   font-family: var(--mono);
@@ -460,6 +522,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 122px;
   padding-top: 14px;
   border-top: 1px solid var(--rack-edge);
 }
@@ -555,4 +618,107 @@ body {
   margin: 0;
   font-size: 13px;
   color: var(--rack-dim);
+}
+
+/* ── conversation ──────────────────────────────────────────────────────── */
+
+.transcript {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.transcript-head {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+/* Fixed height, scrolling inside: the conversation grows without moving anything
+   else on the page. */
+.transcript-lines {
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  height: 132px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--rack-sunken);
+  border: 1px solid var(--rack-edge);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scroll-behavior: smooth;
+}
+
+.transcript-lines:empty + .transcript-empty { display: block; }
+.transcript-empty {
+  display: none;
+  position: absolute;
+  left: 13px;
+  bottom: 12px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+  pointer-events: none;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.line-who {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.line-text {
+  color: var(--rack-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Who is speaking reads from colour as well as from the label, matching the stage
+   hues: the user's words come in through stt, the reply goes out through tts. */
+.line[data-who="you"] .line-who { color: var(--stage-stt); }
+.line[data-who="agent"] .line-who { color: var(--stage-tts); }
+.line[data-failed="true"] .line-text { color: var(--fail); }
+
+/* ── settings ──────────────────────────────────────────────────────────── */
+
+.gear {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rack-dim);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.gear:hover,
+.gear[aria-expanded="true"] {
+  color: var(--rack-ink);
+  border-color: var(--rack-edge);
 }

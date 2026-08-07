@@ -58,7 +58,9 @@ export class Recorder {
 
   async stop(): Promise<Blob> {
     const recorder = this.recorder;
-    if (!recorder) throw new Error("recorder is not running");
+    // Reached when the press never opened the microphone — a denied permission, or a
+    // click too quick for start() to finish.
+    if (!recorder) throw new Error("The microphone did not start. Check the browser's permission and try again.");
 
     cancelAnimationFrame(this.raf);
     this.raf = 0;
