@@ -58,7 +58,7 @@ export default {
     }
 
     // Текст, не аудио: у OpenRouter одноразовых токенов нет, поэтому LLM проксируем.
-    // Модель — за конфигом: кандидат её не выбирает (см. спеку, «Что НЕ является заданием»).
+    // Модель — за конфигом, менять её в клиенте не нужно.
     if (path === "/llm") {
       const body = await req.json();
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {

@@ -1,7 +1,7 @@
 export interface AppConfig {
   workerUrl: string;
   vibeToken: string;
-  /** Нет доступа к API — гоняем фикстуры. Собес это переживает. */
+  /** Нет доступа к API — гоняем записанные фикстуры. */
   offline: boolean;
 }
 

@@ -11,11 +11,11 @@
 cd worker
 wrangler secret put ELEVENLABS_API_KEY
 wrangler secret put OPENROUTER_API_KEY
-wrangler secret put VIBE_TOKEN           # выдаётся кандидату на день собеса
+wrangler secret put VIBE_TOKEN           # общий секрет клиента, выдаётся на время сессии
 wrangler deploy
 ```
 
-Секреты в файлы не пишем никогда. `VIBE_TOKEN` после собеса перевыпускаем.
+Секреты в файлы не пишем никогда. `VIBE_TOKEN` регулярно перевыпускаем.
 
 После деплоя записать выданный адрес (`https://voice-lab-token-minter.<subdomain>.workers.dev`)
 в `VITE_WORKER_URL` сборки фронта — см. корневой `README`.
