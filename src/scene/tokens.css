@@ -18,6 +18,7 @@
   --ink-dim: #5a6472;
 
   --running: #1a4fa0;
+  --on-accent: #ffffff;
   --ok: #1f7a5c;
   --fail: #c2392b;
 
@@ -32,6 +33,11 @@
   --stage-llm: #7209b7;
   --stage-tts: #b5179e;
   --stage-playback: #f72585;
+
+  /* The field sits against the card, not the page, so it needs its own step away
+     from --panel in each theme. */
+  --field: #eef1f6;
+  --field-edge: #b8c2d0;
 
   --rack: #151b24;
   --rack-edge: #263041;
@@ -51,35 +57,44 @@
    media query. */
 @media (prefers-color-scheme: dark) {
   :root {
+    --field: #0b1017;
+    --field-edge: #3a4658;
     --panel: #151b24;
     --ground: #0d1117;
     --edge: #263041;
     --ink: #e6edf3;
     --ink-dim: #8b95a5;
     --running: #58a6ff;
+    --on-accent: #0d1117;
     --ok: #3fb950;
     --fail: #f85149;
   }
 }
 
 :root[data-theme="dark"] {
+  --field: #0b1017;
+  --field-edge: #3a4658;
   --panel: #151b24;
   --ground: #0d1117;
   --edge: #263041;
   --ink: #e6edf3;
   --ink-dim: #8b95a5;
   --running: #58a6ff;
+  --on-accent: #0d1117;
   --ok: #3fb950;
   --fail: #f85149;
 }
 
 :root[data-theme="light"] {
+  --field: #eef1f6;
+  --field-edge: #b8c2d0;
   --panel: #ffffff;
   --ground: #f2f4f7;
   --edge: #d8dde5;
   --ink: #10151c;
   --ink-dim: #5a6472;
   --running: #1a4fa0;
+  --on-accent: #ffffff;
   --ok: #1f7a5c;
   --fail: #c2392b;
 }
@@ -209,7 +224,7 @@ body {
   appearance: none;
   border: 1px solid var(--running);
   background: var(--running);
-  color: #fff;
+  color: var(--on-accent);
   font: 600 14px/1 var(--sans);
   padding: 12px 22px;
   border-radius: 8px;
@@ -342,44 +357,77 @@ body {
   user-select: none;
 }
 
-/* ── token setup: deliberately quiet, it is a one-time step ────────────── */
+/* ── token setup ───────────────────────────────────────────────────────── */
 
+/* Quiet, but not invisible. The first pass made the field's fill identical to the
+   page background and left the button transparent, so neither read as a control at
+   all. It gets its own surface instead, and the field sits lighter than the card it
+   is on so the input is legible as an input. */
 .setup {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  padding-top: 4px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
   font-size: 13px;
   color: var(--ink-dim);
+}
+
+.setup label {
+  color: var(--ink);
 }
 
 .setup input {
   appearance: none;
   font: 13px/1 var(--mono);
   color: var(--ink);
-  background: var(--ground);
-  border: 1px solid var(--edge);
+  background: var(--field);
+  border: 1px solid var(--field-edge);
   border-radius: 7px;
-  padding: 9px 11px;
+  padding: 10px 12px;
   width: 250px;
+  transition: border-color 120ms ease;
 }
 
-.setup input::placeholder { color: var(--ink-dim); }
+.setup input::placeholder {
+  color: var(--ink-dim);
+  opacity: 1;
+}
 
+.setup input:hover { border-color: var(--ink-dim); }
+
+.setup input:focus {
+  border-color: var(--running);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 22%, transparent);
+}
+
+/* Filled, not outlined. As a ghost button its label sat at 3.08 contrast in dark
+   mode — below the 4.5 floor, and it read as decoration rather than the control that
+   turns on live mode. */
 .setup button {
   appearance: none;
-  font: 13px/1 var(--sans);
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--edge);
+  font: 600 13px/1 var(--sans);
+  color: var(--on-accent);
+  background: var(--running);
+  border: 1px solid var(--running);
   border-radius: 7px;
-  padding: 9px 14px;
+  padding: 10px 16px;
   cursor: pointer;
+  transition: filter 120ms ease;
 }
 
-.setup button:hover:not(:disabled) { border-color: var(--running); color: var(--running); }
-.setup button:disabled { cursor: default; opacity: 0.5; }
+.setup button:hover:not(:disabled) { filter: brightness(1.08); }
+
+.setup button:disabled {
+  cursor: default;
+  color: var(--ink-dim);
+  background: var(--field);
+  border-color: var(--field-edge);
+}
 
 .linkish {
   border: 0;
