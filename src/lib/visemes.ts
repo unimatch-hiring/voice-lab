@@ -14,9 +14,12 @@ const GROUPS: Array<[Viseme, string]> = [
   ["L", "lлнdtдтzсsзц"],
   ["WQ", "wq"],
   ["AI", "aiаяиый"],
-  ["E", "eеэ"],
+  ["E", "eеэeэ"],
   ["O", "oоё"],
   ["U", "uую"],
+  // Прочие согласные тоже смыкают рот, но не в «покой»: гримаса L ближе всего
+  // к их артикуляции и не роняет челюсть до конца.
+  ["L", "gгkкxхhчшщжrрvj"],
 ];
 
 const MAP = new Map<string, Viseme>();
@@ -24,6 +27,11 @@ for (const [viseme, chars] of GROUPS) {
   for (const ch of chars) if (!MAP.has(ch)) MAP.set(ch, viseme);
 }
 
+/**
+ * `rest` — только на реальной паузе (пробел, знак препинания). Раньше сюда же
+ * падала любая неизвестная согласная, поэтому рот захлопывался наглухо между
+ * слогами ~15 раз в секунду и анимация читалась как дёрганье, а не как речь.
+ */
 export function charToViseme(ch: string): Viseme {
   return MAP.get(ch.toLowerCase()) ?? "rest";
 }

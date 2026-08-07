@@ -3,6 +3,7 @@ import { EventBus } from "./lib/events";
 import { Orchestrator } from "./lib/pipeline/orchestrator";
 import { PlaybackQueue } from "./lib/pipeline/playback";
 import { Recorder } from "./lib/pipeline/capture";
+import { EnergyVad } from "./lib/pipeline/vad";
 import { createTransport } from "./lib/transport";
 import { transcribe } from "./lib/pipeline/stt";
 import { respond } from "./lib/pipeline/llm";
@@ -20,9 +21,25 @@ export function App() {
     () => new PlaybackQueue(new AudioContext() as never),
     [],
   );
-  const recorder = useMemo(() => new Recorder(), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Живой вход: уровень идёт в сцену на каждый кадр, VAD размечает границы речи
+  // как стадии capture и vad. Без этого две полосы конвейера остаются пустыми.
+  const recorder = useMemo(() => {
+    const vad = new EnergyVad();
+    return new Recorder({
+      onFrame: ({ samples, rms, at }) => {
+        bus.emit({ type: "audio-level", rms, at });
+        const event = vad.push(samples);
+        if (event === "speech-start") {
+          bus.emit({ type: "stage-start", stage: "vad", at });
+        } else if (event === "speech-end") {
+          bus.emit({ type: "stage-end", stage: "vad", at, ttfbMs: 0 });
+        }
+      },
+    });
+  }, [bus]);
 
   const orch = useMemo(() => {
     if (config.offline) {
@@ -52,6 +69,7 @@ export function App() {
     // не отпустить. Турн запускается из stop(), как и в живом режиме.
     if (!config.offline) {
       try {
+        bus.emit({ type: "stage-start", stage: "capture", at: performance.now() });
         await recorder.start();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -65,7 +83,13 @@ export function App() {
     holding.current = false;
     setBusy(true);
     try {
-      const audio = config.offline ? new Blob([]) : await recorder.stop();
+      let audio: Blob;
+      if (config.offline) {
+        audio = new Blob([]);
+      } else {
+        audio = await recorder.stop();
+        bus.emit({ type: "stage-end", stage: "capture", at: performance.now(), ttfbMs: 0 });
+      }
       await orch.runTurn(audio);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

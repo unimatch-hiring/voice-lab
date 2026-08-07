@@ -1,8 +1,24 @@
+/** Кадр анализа микрофона: сэмплы окна и их среднеквадратичный уровень. */
+export interface CaptureFrame {
+  samples: Float32Array;
+  rms: number;
+  at: number;
+}
+
+export interface RecorderOptions {
+  /** Вызывается ~на каждый кадр анимации, пока идёт запись. */
+  onFrame?: (frame: CaptureFrame) => void;
+}
+
 /** Запись с микрофона. Отдаёт webm-блоб, который принимает Scribe. */
 export class Recorder {
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private stream: MediaStream | null = null;
+  private ctx: AudioContext | null = null;
+  private raf = 0;
+
+  constructor(private opts: RecorderOptions = {}) {}
 
   get isRecording(): boolean {
     return this.recorder?.state === "recording";
@@ -18,11 +34,34 @@ export class Recorder {
       if (e.data.size > 0) this.chunks.push(e.data);
     };
     this.recorder.start(100);
+
+    if (this.opts.onFrame) this.startAnalysis(this.stream, this.opts.onFrame);
+  }
+
+  /** Живой уровень входа: MediaRecorder отдаёт только сжатый блоб, сэмплов в нём нет. */
+  private startAnalysis(stream: MediaStream, onFrame: (f: CaptureFrame) => void): void {
+    this.ctx = new AudioContext();
+    const analyser = this.ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    this.ctx.createMediaStreamSource(stream).connect(analyser);
+
+    const buf = new Float32Array(analyser.fftSize);
+    const tick = () => {
+      this.raf = requestAnimationFrame(tick);
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      onFrame({ samples: buf, rms: Math.sqrt(sum / buf.length), at: performance.now() });
+    };
+    this.raf = requestAnimationFrame(tick);
   }
 
   async stop(): Promise<Blob> {
     const recorder = this.recorder;
     if (!recorder) throw new Error("recorder is not running");
+
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
 
     const blob = await new Promise<Blob>((resolve) => {
       recorder.onstop = () => resolve(new Blob(this.chunks, { type: "audio/webm" }));
@@ -30,8 +69,10 @@ export class Recorder {
     });
 
     for (const track of this.stream?.getTracks() ?? []) track.stop();
+    await this.ctx?.close().catch(() => {});
     this.recorder = null;
     this.stream = null;
+    this.ctx = null;
     return blob;
   }
 }
