@@ -14,15 +14,15 @@ test("reports speech-start once when energy crosses the threshold", () => {
 
   expect(vad.push(quiet())).toBeNull();
   expect(vad.push(loud())).toBe("speech-start");
-  expect(vad.push(loud())).toBeNull(); // уже говорим — второй раз не сообщаем
+  expect(vad.push(loud())).toBeNull(); // already speaking — do not report it twice
 });
 
 test("waits out the hangover before reporting speech-end", () => {
   const vad = new EnergyVad({ threshold: 0.1, hangoverFrames: 2 });
   vad.push(loud());
 
-  expect(vad.push(quiet())).toBeNull(); // 1 тихий кадр — ещё рано
-  expect(vad.push(quiet())).toBe("speech-end"); // 2 подряд — конец речи
+  expect(vad.push(quiet())).toBeNull(); // 1 quiet frame — too early
+  expect(vad.push(quiet())).toBe("speech-end"); // 2 in a row — end of speech
 });
 
 test("a short pause inside speech does not end the turn", () => {
@@ -31,7 +31,7 @@ test("a short pause inside speech does not end the turn", () => {
 
   vad.push(quiet());
   vad.push(quiet());
-  expect(vad.push(loud())).toBeNull(); // вернулись к речи до истечения hangover
+  expect(vad.push(loud())).toBeNull(); // speech resumed before the hangover ran out
   expect(vad.push(quiet())).toBeNull();
 });
 

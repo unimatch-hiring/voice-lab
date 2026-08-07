@@ -53,10 +53,10 @@ test("offline replies stream token by token, not in one lump", async () => {
 
 test("long text is split into several chunks", () => {
   const long = FIXTURES.find((f) => f.reply.length > 40);
-  expect(long, "нужна фикстура с ответом длиннее одного чанка").toBeTruthy();
+  expect(long, "need a fixture whose reply is longer than one chunk").toBeTruthy();
   expect(long!.chunks.length).toBeGreaterThan(1);
 
-  // Тайминги внутри чанка отсчитываются от его начала.
+  // Timings inside a chunk are counted from its own start.
   for (const c of long!.chunks) {
     expect(c.charStartTimesMs[0]).toBe(0);
     expect(c.chars.length).toBe(c.charStartTimesMs.length);

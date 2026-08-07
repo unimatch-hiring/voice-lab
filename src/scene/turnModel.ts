@@ -20,7 +20,7 @@ export class TurnModel {
     return this.rms;
   }
 
-  /** Самая поздно начатая из незакрытых — при перекрытии она информативнее. */
+  /** The latest-started open span — on overlap it is the more informative one. */
   get activeStage(): StageName | null {
     let best: Span | null = null;
     for (const span of this.open.values()) {
@@ -65,7 +65,7 @@ export class TurnModel {
     }
   }
 
-  /** Выбрасывает спаны, целиком уехавшие за левый край окна. */
+  /** Drops spans that have scrolled entirely past the left edge of the window. */
   prune(now: number, windowMs: number): void {
     const cutoff = now - windowMs;
     if (this.spans.length === 0) return;

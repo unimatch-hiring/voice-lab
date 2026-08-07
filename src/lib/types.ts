@@ -4,7 +4,7 @@ export const STAGE_ORDER: readonly StageName[] = [
   "capture", "vad", "stt", "llm", "tts", "playback",
 ] as const;
 
-/** Per-stage TTFB + usage за один conversational turn. Форма из voice-poc. */
+/** Per-stage TTFB + usage for one conversational turn. Shape carried over from voice-poc. */
 export interface TurnMetrics {
   stages: Partial<Record<StageName, number>>;
   llmTokens: number;
@@ -13,10 +13,10 @@ export interface TurnMetrics {
 
 export interface SttWord {
   text: string;
-  /** Секунды от начала аудио. */
+  /** Seconds from the start of the audio. */
   start: number;
   end: number;
-  /** 0..1. Scribe отдаёт на слово, не на фразу. */
+  /** 0..1. Scribe reports it per word, not per phrase. */
   confidence: number;
 }
 
@@ -25,7 +25,7 @@ export interface SttResult {
   words: SttWord[];
 }
 
-/** Чанк от websocket TTS: аудио + посимвольная раскладка времени. */
+/** A chunk from the websocket TTS: audio plus per-character timing. */
 export interface TtsChunk {
   audio: Int16Array;
   chars: string[];
@@ -39,11 +39,11 @@ export type PipelineEvent =
   | { type: "stage-end"; stage: StageName; at: number; ttfbMs: number }
   | { type: "stage-error"; stage: StageName; at: number; message: string }
   | { type: "stt-result"; result: SttResult }
-  // at обязателен: без него скорость токенов меряется временем прибытия,
-  // то есть транспортом, а не моделью.
+  // `at` is mandatory: without it token rate is measured by arrival time,
+  // i.e. by the transport rather than by the model.
   | { type: "llm-token"; token: string; at: number }
-  // Уровень входного аудио, ~100 Гц. Эмитит capture при живом микрофоне;
-  // в оффлайн-режиме событий нет, сцена показывает 0.
+  // Input audio level, ~100 Hz. Emitted by capture with a live mic; offline there
+  // are no such events and the scene shows 0.
   | { type: "audio-level"; rms: number; at: number }
   | { type: "tts-chunk"; chunk: TtsChunk; offsetMs: number }
   | { type: "turn-end"; at: number; metrics: TurnMetrics };

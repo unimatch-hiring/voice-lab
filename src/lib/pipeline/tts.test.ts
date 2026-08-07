@@ -4,7 +4,7 @@ import type { WebSocketLike } from "./tts";
 
 const transport = { ttsToken: async () => "tok" } as never;
 
-/** Мини-фейк вебсокета: отдаёт заранее заданные серверные кадры. */
+/** Minimal websocket fake: replays a predefined set of server frames. */
 function fakeSocket(frames: unknown[]): { factory: () => WebSocketLike; sent: string[] } {
   const sent: string[] = [];
   const factory = () => {
@@ -43,7 +43,7 @@ test("yields chunks with audio and character alignment", async () => {
   expect(out).toHaveLength(1);
   expect(out[0].chars).toEqual(["п", "р"]);
   expect(out[0].charStartTimesMs).toEqual([0, 50]);
-  expect(out[0].audio.length).toBe(2); // 4 байта -> 2 сэмпла Int16
+  expect(out[0].audio.length).toBe(2); // 4 bytes -> 2 Int16 samples
 });
 
 test("prefers normalizedAlignment when present", async () => {

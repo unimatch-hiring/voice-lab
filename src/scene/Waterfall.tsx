@@ -78,14 +78,14 @@ export function Waterfall({ bus }: { bus: EventBus }) {
         ctx.globalAlpha = 1;
       }
 
-      // Курсор «сейчас» — правый край окна.
+      // The "now" cursor — the right edge of the window.
       ctx.strokeStyle = "rgba(16,21,28,0.25)";
       ctx.beginPath();
       ctx.moveTo(Math.round(xOf(now)) + 0.5, 0);
       ctx.lineTo(Math.round(xOf(now)) + 0.5, h);
       ctx.stroke();
 
-      // Уровень и счётчик — записью в DOM, минуя React.
+      // Level and counter are written straight to the DOM, bypassing React.
       const level = model.level;
       smooth += (level - smooth) * (level > smooth ? 0.5 : 0.12);
       if (levelRef.current) levelRef.current.style.transform = `scaleX(${smooth.toFixed(4)})`;
@@ -103,7 +103,7 @@ export function Waterfall({ bus }: { bus: EventBus }) {
     <div>
       <div className="wf-meta">
         <span className="wf-level"><span ref={levelRef} className="wf-level-fill" /></span>
-        <span>токенов: <b ref={tokensRef}>0</b></span>
+        <span>tokens: <b ref={tokensRef}>0</b></span>
       </div>
       <canvas ref={canvasRef} className="wf-canvas" />
     </div>

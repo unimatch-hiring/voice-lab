@@ -4,8 +4,8 @@ compatibility_date = "2026-08-05"
 
 [vars]
 LLM_MODEL = "anthropic/claude-haiku-4.5"
-# Кто имеет право дёргать Worker из браузера. Прод-фронт на GitHub Pages
-# плюс локальная разработка. Origin — со схемой и без хвостового слеша.
-# :5173 — dev-сервер, :4173 — `vite preview`, на котором проверяют прод-сборку
-# перед деплоем. Без второго порта связку локально не проверить.
+# Who may call the Worker from a browser: the deployed frontend on GitHub Pages
+# plus local development. Origins include the scheme and no trailing slash.
+# :5173 is the dev server, :4173 is `vite preview`, where the production build is
+# checked before deploying — without the second port that check is impossible.
 ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173"

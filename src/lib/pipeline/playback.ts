@@ -30,7 +30,7 @@ export class PlaybackQueue {
     private sampleRate = 16000,
   ) {}
 
-  /** Сколько миллисекунд прошло с начала первого чанка. Драйвит анимацию рта. */
+  /** Milliseconds since the start of the first chunk. Drives the mouth animation. */
   get elapsedMs(): number {
     if (this.startedAt === null) return 0;
     return Math.max(0, (this.ctx.currentTime - this.startedAt) * 1000);
@@ -52,8 +52,8 @@ export class PlaybackQueue {
     source.buffer = buffer;
     source.connect(this.ctx.destination);
 
-    // Планируем от конца предыдущего чанка, а не от «сейчас»: иначе щелчки и наложения.
-    // Но если очередь давно опустела, догоняем часы контекста, чтобы не играть в прошлое.
+    // Schedule from the end of the previous chunk, not from "now": otherwise clicks and overlaps.
+    // But if the queue drained long ago, catch up to the context clock so we don't play in the past.
     const at = Math.max(this.nextStartTime, this.ctx.currentTime);
     source.start(at);
 
@@ -67,7 +67,7 @@ export class PlaybackQueue {
       try {
         s.stop();
       } catch {
-        // источник мог не начаться — это нормально
+        // the source may never have started — that's fine
       }
     }
     this.sources = [];

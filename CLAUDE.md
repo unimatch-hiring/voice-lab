@@ -1,63 +1,66 @@
 # voice-lab — project context for AI coding agents
 
-Интерактивный explainer конвейера голосового агента. Говоришь фразу — видишь, как
-она течёт по стадиям (`capture → vad → stt → llm → tts → playback`) с реальными
-таймингами, и слышишь ответ голосом. Клиентский SPA, своего бэкенда нет.
+An interactive explainer of a voice-agent pipeline. Say a phrase, watch it flow
+through the stages (`capture → vad → stt → llm → tts → playback`) with real
+timings, and hear the reply spoken back. Client-side SPA, no backend of its own.
 
 ## Stack & commands
 
 - Vite + React 19 + TypeScript (strict).
 - `npm ci` — install. `npm run dev` → http://localhost:5173. `npm run build` → `dist/`.
-- `npm test` — vitest. Type-check входит в build (`tsc -b`).
+- `npm test` — vitest. Type-check is part of the build (`tsc -b`).
 
 ## Layout
 
-- `src/lib/pipeline/*` — стадии конвейера, каждая с узким интерфейсом.
-- `src/lib/pipeline/orchestrator.ts` — прогон turn'а, сбор метрик, эмит событий.
-- `src/lib/transport.ts` — единственное место, знающее про token-minter.
-- `src/lib/visemes.ts` — символ → визима поверх `alignment` от TTS.
-- `src/scene/*` — сцена. Читает только поток событий.
-- `public/face/*` — кадры персонажа: `rest` плюс три фазы раскрытия на визиму
-  (`*q` четверть, `*h` половина, без суффикса — полная). Собираются скриптом
-  `tools/build-face-sprites.py` из сгенерированных исходников, руками не правятся.
-- `src/lib/fixtures/` — записанные turn'ы для оффлайн-режима.
-- `worker/` — Cloudflare Worker, выдаёт одноразовые токены ElevenLabs.
+- `src/lib/pipeline/*` — pipeline stages, each behind a narrow interface.
+- `src/lib/pipeline/orchestrator.ts` — runs a turn, collects metrics, emits events.
+- `src/lib/transport.ts` — the only place that knows about the token-minter.
+- `src/lib/visemes.ts` — character → viseme on top of the TTS `alignment`.
+- `src/scene/*` — the scene. Reads the event stream only.
+- `public/face/*` — character frames: `rest` plus three opening phases per viseme
+  (`*q` quarter, `*h` half, no suffix — full). Built by `tools/build-face-sprites.py`
+  from the generated sources; never hand-edited.
+- `src/lib/fixtures/` — recorded turns for offline mode.
+- `worker/` — Cloudflare Worker handing out single-use ElevenLabs tokens.
 
-## Правила, которые нельзя нарушать
+## Rules that must not be broken
 
-**1. Никогда `setState` на высокочастотные данные.** Аудио-чанки, токены LLM,
-кадры анимации, прогресс стадии — только в `useRef`. Один `requestAnimationFrame`
-читает refs и рисует. Ноль рендеров React на кадр.
+**1. Never `setState` on high-frequency data.** Audio chunks, LLM tokens, animation
+frames, stage progress — `useRef` only. A single `requestAnimationFrame` reads the
+refs and draws. Zero React renders per frame.
 
-Что ломается, если нарушить: поток событий на 100 Hz превращается в 100 рендеров/с,
-UI начинает лагать, и сцена перестаёт показывать честные тайминги — то есть продукт
-начинает врать о том, для чего он вообще существует. На это есть тест
-(`src/scene/render-count.test.ts`), он упадёт.
+What breaks otherwise: a 100 Hz event stream turns into 100 renders/s, the UI
+starts to lag, and the scene stops showing honest timings — meaning the product
+starts lying about the one thing it exists for. There is a test for this
+(`src/scene/render-count.test.tsx`) and it will fail.
 
-Конкретно нельзя: `setState` на аудио-чанк или токен; анимировать 200 SVG-нод как
-React-детей; живой мс-счётчик как React-текст без троттлинга до ~10 Hz.
+Specifically forbidden: `setState` per audio chunk or token; animating 200 SVG
+nodes as React children; a live millisecond counter as React text without
+throttling to ~10 Hz.
 
-**2. Границы модулей.** `src/scene/*` не импортирует `src/lib/pipeline/*` (только
-`types.ts` и `events.ts`). Пайплайн не знает, что его рисуют. Любую половину можно
-менять, не ломая другую.
+**2. Module boundaries.** `src/scene/*` does not import `src/lib/pipeline/*` (only
+`types.ts` and `events.ts`). The pipeline does not know it is being drawn. Either
+half can change without breaking the other.
 
-**3. Рот — непрерывная амплитуда, а не переключение кадров.** `Mouth.tsx` ведёт
-величину раскрытия 0..1, гасит её инерцией и раскладывает по соседним фазам с
-суммой прозрачностей ровно 1. Три вещи, каждая из которых уже ломала анимацию:
+**3. The mouth is a continuous amplitude, not frame switching.** `Mouth.tsx` drives
+an opening value 0..1, damps it with inertia, and distributes it across adjacent
+phases so the opacities always sum to exactly 1. Three things, each of which has
+already broken the animation once:
 
-- **CSS-`transition` поверх этого нельзя.** Это второй источник времени: на 10-15
-  сменах визимы в секунду fade не успевает завершиться, кадры мелькают по 16 мс.
-- **Слои не складывать.** Если оба соседних кадра горят на 100%, плотность растёт
-  вдвое и это видно как рывок посреди движения.
-- **Порог тишины растягивать, а не обрубать.** Обнуление амплитуды на пороге даёт
-  скачок при каждом входе в речь.
+- **No CSS `transition` on top of it.** That is a second source of time: at 10-15
+  viseme changes per second the fade never finishes and frames flicker for 16 ms.
+- **Do not let layers add up.** With both neighbouring frames at 100% the density
+  doubles, which is visible as a jolt mid-motion.
+- **Stretch the silence threshold, do not clip it.** Zeroing the amplitude at the
+  threshold makes the mouth jump open on every speech onset.
 
-Проверяется `src/scene/sprites.test.ts` — он мерит **пиксели** спрайтов. Тесты на
-одни только числа `opacity` тут бесполезны: они остаются зелёными на визуально
-сломанной анимации, это уже проверено на практике.
+Guarded by `src/scene/sprites.test.ts`, which measures the **pixels** of the
+sprites. Tests over `opacity` numbers alone are useless here: they stay green on a
+visibly broken animation — verified the hard way.
 
 ## Conventions
 
-- Ноль новых runtime-зависимостей. Только react + react-dom.
-- Русский STT — всегда `language_code=rus`. Дефолтный `eng` на русской речи даёт мусор.
-- Оффлайн-режим на фикстурах должен работать всегда — он прогоняется в CI.
+- Zero new runtime dependencies. Only react + react-dom.
+- Russian STT is always `language_code=rus`. The default `eng` turns Russian speech
+  into garbage.
+- Offline mode on fixtures must always work — CI runs it.

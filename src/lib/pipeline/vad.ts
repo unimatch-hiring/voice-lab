@@ -2,7 +2,7 @@ export type VadEvent = "speech-start" | "speech-end";
 
 export interface VadOptions {
   threshold?: number;
-  /** Сколько тихих кадров подряд считать концом речи. Короткая пауза — не конец. */
+  /** How many consecutive quiet frames count as end of speech. A short pause is not the end. */
   hangoverFrames?: number;
 }
 

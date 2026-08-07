@@ -29,13 +29,13 @@ test("reads the viseme active at a given moment", () => {
 
   expect(t.at(50)).toBe("MBP");
   expect(t.at(150)).toBe("AI");
-  expect(t.at(500)).toBe("rest"); // после конца — рот закрыт
+  expect(t.at(500)).toBe("rest"); // past the end the mouth is closed
 });
 
 test("chunk timestamps are relative, so the second chunk is offset by the first", () => {
   const t = new VisemeTimeline();
-  t.append(chunk(["m"], [0], [100]));   // 0..100 абсолютных
-  t.append(chunk(["o"], [0], [100]));   // снова начинается с 0 -> должно стать 100..200
+  t.append(chunk(["m"], [0], [100]));   // 0..100 absolute
+  t.append(chunk(["o"], [0], [100]));   // starts at 0 again -> must become 100..200
 
   expect(t.at(50)).toBe("MBP");
   expect(t.at(150)).toBe("O");
@@ -44,7 +44,7 @@ test("chunk timestamps are relative, so the second chunk is offset by the first"
 
 test("a gap between chunks does not desync later chunks", () => {
   const t = new VisemeTimeline();
-  // Первый чанк кончается на 100, но внутри есть пауза: последний символ стартует с 60.
+  // The first chunk ends at 100, but has a pause inside it: the last char starts at 60.
   t.append(chunk(["m", " "], [0, 60], [60, 40]));
   t.append(chunk(["o"], [0], [100]));
 

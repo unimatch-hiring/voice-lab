@@ -43,7 +43,7 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
       const decoder = new TextDecoder();
       let buffer = "";
 
-      // null = не кадр данных, "done" = конец стрима, иначе — токен.
+      // null = not a data frame, "done" = end of stream, otherwise a token.
       const parseFrame = (frame: string): string | null | "done" => {
         const line = frame.trim();
         if (!line.startsWith("data:")) return null;
@@ -58,7 +58,7 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
-        // SSE-кадры разделены пустой строкой; последний фрагмент может быть неполным.
+        // SSE frames are separated by a blank line; the last piece may be incomplete.
         const frames = buffer.split("\n\n");
         buffer = frames.pop() ?? "";
 
@@ -69,7 +69,7 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
         }
       }
 
-      // Стрим мог оборваться без [DONE] и без завершающего \n\n — разобрать хвост буфера тем же способом.
+      // The stream may have ended without [DONE] and without a trailing \n\n — parse the leftover buffer the same way.
       const tail = parseFrame(buffer);
       if (tail && tail !== "done") yield tail;
     },

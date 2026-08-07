@@ -1,35 +1,38 @@
 # voice-lab token-minter
 
-Выдаёт одноразовые токены ElevenLabs клиенту и проксирует LLM-запросы (текст).
-Аудио через Worker не течёт — только короткий JSON с токеном.
+Hands single-use ElevenLabs tokens to the client and proxies LLM requests (text).
+No audio flows through the Worker — just a short JSON with a token.
 
-## Деплой
+## Deploy
 
-Зон в аккаунте нет, поэтому адрес будет `*.workers.dev`.
+There are no zones on the account, so the address will be `*.workers.dev`.
 
 ```sh
 cd worker
 wrangler secret put ELEVENLABS_API_KEY
 wrangler secret put OPENROUTER_API_KEY
-wrangler secret put VIBE_TOKEN           # общий секрет клиента, выдаётся на время сессии
+wrangler secret put VIBE_TOKEN           # shared client secret, issued per session
 wrangler deploy
 ```
 
-Секреты в файлы не пишем никогда. `VIBE_TOKEN` регулярно перевыпускаем.
+Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
 
-После деплоя записать выданный адрес (`https://voice-lab-token-minter.<subdomain>.workers.dev`)
-в `VITE_WORKER_URL` сборки фронта — см. корневой `README`.
+After deploying, put the address you get
+(`https://voice-lab-token-minter.<subdomain>.workers.dev`) into the frontend's
+`VITE_WORKER_URL` — see the root `README`.
 
-## Кто может дёргать
+## Who may call it
 
-`ALLOWED_ORIGINS` в `wrangler.toml` — список origin'ов, которым Worker отвечает.
-Всем остальным `403`. Меняется без правки кода: поправить `[vars]` и `wrangler deploy`.
+`ALLOWED_ORIGINS` in `wrangler.toml` is the list of origins the Worker answers.
+Everyone else gets `403`. Changing it needs no code edit: adjust `[vars]` and
+`wrangler deploy`.
 
-Origin GitHub Pages — только хост (`https://<org>.github.io`), без пути проекта.
+For GitHub Pages the origin is the host only (`https://<org>.github.io`), without
+the project path.
 
-## Локальная разработка
+## Local development
 
-`.dev.vars` (в `.gitignore`, не коммитить):
+`.dev.vars` (gitignored, never commit):
 
 ```
 ELEVENLABS_API_KEY=...

@@ -8,7 +8,7 @@ const VISEMES: Viseme[] = ["rest", "MBP", "AI", "E", "O", "U", "FV", "L", "WQ"];
 
 test("ships a sprite for every viseme", () => {
   for (const v of VISEMES) {
-    expect(MOUTH_SPRITES[v], `нет спрайта для ${v}`).toBeTruthy();
+    expect(MOUTH_SPRITES[v], `no sprite for ${v}`).toBeTruthy();
     expect(MOUTH_SPRITES[v].endsWith(".png")).toBe(true);
   }
 });
@@ -18,7 +18,7 @@ test("every viseme maps to its own file", () => {
   expect(new Set(files).size).toBe(VISEMES.length);
 });
 
-/** Визима первого символа фразы — по ней проверяем стартовый кадр. */
+/** Viseme of the phrase's first character — used to check the starting frame. */
 function timelineOf(chars: string[], durMs = 100): VisemeTimeline {
   const t = new VisemeTimeline();
   t.append({
@@ -31,12 +31,12 @@ function timelineOf(chars: string[], durMs = 100): VisemeTimeline {
 }
 
 /**
- * Какая форма рта сейчас проступает и насколько раскрыт рот (0..1).
+ * Which mouth shape is showing right now, and how far it is open (0..1).
  *
- * Раскрытие разложено по четырём кадрам (rest -> q -> h -> полный) с постоянной
- * суммой прозрачностей: видно ровно двух соседей по фазе. Поэтому амплитуду
- * восстанавливаем как позицию между этими соседями на шкале фаз, а не как сумму
- * прозрачностей — суммой она была бы всегда единицей.
+ * Openness is spread across four frames (rest -> q -> h -> full) with a constant
+ * opacity sum: exactly two phase neighbours are visible. So we recover the
+ * amplitude as the position between those neighbours on the phase scale, not as
+ * the opacity sum — that sum would always be one.
  */
 const PHASE_LEVEL: Record<string, number> = { rest: 0, q: 1 / 3, h: 2 / 3, full: 1 };
 
@@ -54,8 +54,8 @@ function readMouth(container: HTMLElement) {
     })
     .filter((f) => f.name !== "rest" && f.opacity > 0.01);
 
-  // Взвешенная позиция на шкале фаз: доли складываются в единицу, поэтому это
-  // ровно то раскрытие, которое видит глаз.
+  // Weighted position on the phase scale: the weights sum to one, so this is
+  // exactly the openness the eye sees.
   const openness = lit.reduce((sum, f) => sum + f.level * f.opacity, 0);
   const shape = lit.length
     ? lit.reduce((a, b) => (b.opacity > a.opacity ? b : a)).shape
@@ -65,7 +65,7 @@ function readMouth(container: HTMLElement) {
 
 test("mouth follows the audio playhead, not a wall clock", () => {
   const timeline = timelineOf(["м", "а"]);
-  // Плейхед стоит: аудио не играет.
+  // Playhead parked: audio is not playing.
   const playback = { elapsedMs: 0, isPlaying: false, enqueue: () => {}, stop: () => {} };
 
   const frames: FrameRequestCallback[] = [];
@@ -80,17 +80,17 @@ test("mouth follows the audio playhead, not a wall clock", () => {
       <Mouth timeline={timeline} playback={playback as never} />,
     );
 
-    // Кадры крутятся с разным временем, плейхед не двигается — форма стоит.
+    // Frames tick along with varying timestamps, the playhead does not move — the shape holds.
     for (let i = 0; i < 60; i++) frames.splice(0).forEach((cb) => cb(i * 16));
     expect(readMouth(container).shape).toBe("MBP");
     const held = readMouth(container).openness;
     for (let i = 0; i < 20; i++) frames.splice(0).forEach((cb) => cb(1000 + i * 16));
-    expect(readMouth(container).openness, "плейхед стоит — рот не движется").toBeCloseTo(
-      held,
-      1,
-    );
+    expect(
+      readMouth(container).openness,
+      "playhead parked — the mouth does not move",
+    ).toBeCloseTo(held, 1);
 
-    // Двигаем ТОЛЬКО плейхед — форма обязана поехать к следующей визиме.
+    // Move ONLY the playhead — the shape must travel to the next viseme.
     playback.elapsedMs = 150;
     for (let i = 0; i < 20; i++) frames.splice(0).forEach((cb) => cb(2000 + i * 16));
     expect(readMouth(container).shape).toBe("AI");
@@ -100,12 +100,12 @@ test("mouth follows the audio playhead, not a wall clock", () => {
   }
 });
 
-test("рот едет к форме, а не прыгает в неё", () => {
-  // Спрайты сняты широко открытыми, поэтому дискретная смена кадра — всегда
-  // скачок амплитуды: именно он и читался как дёрганье. Раскрытие должно
-  // набираться постепенно, за несколько кадров анимации.
-  // Визима длинная: со сглаживанием ~200 мс на коротком слоге рот законно не
-  // успевает распахнуться до конца, и проверять на нём амплитуду нечестно.
+test("the mouth travels into a shape instead of snapping to it", () => {
+  // The sprites were drawn wide open, so a discrete frame swap is always a jump
+  // in amplitude — that is what read as jitter. Openness must build up
+  // gradually, over several animation frames.
+  // A long viseme on purpose: with ~200 ms of smoothing a short syllable legitimately
+  // never reaches full opening, so measuring amplitude on one would be unfair.
   const timeline = timelineOf(["а"], 800);
   const playback = { elapsedMs: 0, isPlaying: true, enqueue: () => {}, stop: () => {} };
 
@@ -122,30 +122,32 @@ test("рот едет к форме, а не прыгает в неё", () => {
     );
 
     const seen: number[] = [];
-    // 60 кадров ~ 1 c: со сглаживанием ~200 мс до цели рот успевает доехать.
+    // 60 frames ~ 1 s: with ~200 ms to target the mouth has time to get there.
     for (let i = 0; i < 60; i++) {
       playback.elapsedMs = i * 16;
       frames.splice(0).forEach((cb) => cb(playback.elapsedMs));
       seen.push(readMouth(container).openness);
     }
 
-    expect(seen[0], "на первом кадре рот ещё почти закрыт").toBeLessThan(0.25);
-    expect(Math.max(...seen), "к концу визимы рот раскрыт").toBeGreaterThan(0.5);
+    expect(seen[0], "on the first frame the mouth is still nearly shut").toBeLessThan(0.25);
+    expect(Math.max(...seen), "by the end of the viseme the mouth is open").toBeGreaterThan(
+      0.5,
+    );
 
     let maxJump = 0;
     for (let i = 1; i < seen.length; i++) {
       maxJump = Math.max(maxJump, Math.abs(seen[i] - seen[i - 1]));
     }
-    // Ступенька «закрыто → распахнуто» дала бы скачок около 1.0.
-    expect(maxJump, "амплитуда меняется плавно, без ступеньки").toBeLessThan(0.3);
+    // A "shut → wide open" step would produce a jump of about 1.0.
+    expect(maxJump, "amplitude changes smoothly, with no step").toBeLessThan(0.3);
   } finally {
     globalThis.requestAnimationFrame = originalRaf;
   }
 });
 
-test("форма держится достаточно долго, чтобы её было видно", () => {
-  // Референсная практика 2D-липсинка: frame-holding. Без него форма скачет
-  // чаще, чем глаз читает как речь, — рот дрожит.
+test("a shape holds long enough to be seen", () => {
+  // Standard 2D lip-sync practice: frame-holding. Without it the shape changes
+  // faster than the eye reads as speech, and the mouth jitters.
   const timeline = timelineOf(["м", "а", "о", "у", "и"], 40);
   const playback = { elapsedMs: 0, isPlaying: true, enqueue: () => {}, stop: () => {} };
 
@@ -168,14 +170,16 @@ test("форма держится достаточно долго, чтобы е
       shapes.push(readMouth(container).shape);
     }
 
-    // Считаем серии подряд идущих одинаковых форм.
+    // Count runs of consecutive identical shapes.
     const lengths: number[] = [];
     for (let i = 0; i < shapes.length; i++) {
       if (i === 0 || shapes[i] !== shapes[i - 1]) lengths.push(1);
       else lengths[lengths.length - 1]++;
     }
     const flicker = lengths.filter((n) => n === 1).length;
-    expect(flicker, `форм, мелькнувших на один кадр: ${flicker}`).toBeLessThanOrEqual(1);
+    expect(flicker, `shapes that flashed for a single frame: ${flicker}`).toBeLessThanOrEqual(
+      1,
+    );
   } finally {
     globalThis.requestAnimationFrame = originalRaf;
   }

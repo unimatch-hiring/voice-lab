@@ -4,13 +4,14 @@ import { inflateSync } from "node:zlib";
 import { MOUTH_SPRITES, HALF_SPRITES, QUARTER_SPRITES } from "./Mouth";
 
 /**
- * Тесты на сами спрайты, а не на числа, которые компонент выставляет в opacity.
+ * Tests over the sprites themselves, not over the opacity numbers the component
+ * writes out.
  *
- * Предыдущая версия проверяла только амплитуду и удержание формы — и была
- * полностью зелёной на анимации, которая читалась как мыло: промежуточные кадры
- * оказались альфа-смесью «закрыто»+«открыто», то есть двойной экспозицией с
- * призрачными зубами. Числа были гладкие, картинка — сломанная. Здесь мы меряем
- * пиксели, поэтому именно тот дефект не проходит.
+ * The previous version checked only amplitude and shape hold — and stayed fully
+ * green on an animation that looked like mush: the intermediate frames turned out
+ * to be an alpha blend of "shut" + "open", i.e. a double exposure with ghost
+ * teeth. Smooth numbers, broken picture. Here we measure pixels, so that exact
+ * defect cannot pass.
  */
 
 const FACE_DIR = `${process.cwd()}/public/`;
@@ -18,21 +19,21 @@ const FACE_DIR = `${process.cwd()}/public/`;
 interface Bitmap {
   width: number;
   height: number;
-  /** Яркость по пикселям, построчно. */
+  /** Per-pixel luminance, row by row. */
   luma: Float64Array;
 }
 
 /**
- * Минимальный декодер PNG: только то, что нужно тесту. Готовый пакет тянуть не
- * стали — правило репозитория «ноль новых зависимостей», а спрайты пишет наш же
- * генератор в предсказуемом виде (8 бит, палитра или RGB, один IDAT-поток).
+ * Minimal PNG decoder: only what the test needs. We did not pull in a package —
+ * the repo rule is "zero new dependencies", and the sprites are written by our own
+ * generator in a predictable form (8 bit, palette or RGB, a single IDAT stream).
  */
 function decodePng(buf: Buffer): Bitmap {
   const width = buf.readUInt32BE(16);
   const height = buf.readUInt32BE(20);
   const depth = buf[24];
   const colorType = buf[25];
-  if (depth !== 8) throw new Error(`ожидали 8 бит на канал, получили ${depth}`);
+  if (depth !== 8) throw new Error(`expected 8 bits per channel, got ${depth}`);
 
   const idat: Buffer[] = [];
   let palette: Buffer | null = null;
@@ -59,7 +60,7 @@ function decodePng(buf: Buffer): Bitmap {
     const filter = raw[src++];
     raw.copy(line, 0, src, src + stride);
     src += stride;
-    // Разворачиваем построчные фильтры PNG (спека 9.2).
+    // Undo the PNG per-scanline filters (spec 9.2).
     for (let i = 0; i < stride; i++) {
       const a = i >= channels ? line[i - channels] : 0;
       const b = prev[i];
@@ -101,11 +102,11 @@ function decodePng(buf: Buffer): Bitmap {
 
 function load(rel: string): Bitmap {
   const path = FACE_DIR + rel;
-  if (!existsSync(path)) throw new Error(`нет спрайта: ${rel}`);
+  if (!existsSync(path)) throw new Error(`missing sprite: ${rel}`);
   return decodePng(readFileSync(path));
 }
 
-/** Яркость в зоне рта (доли кадра — та же рамка, что у генератора). */
+/** Luminance inside the mouth region (frame fractions — same box as the generator). */
 function mouthLuma(bmp: Bitmap): Float64Array {
   const x0 = Math.round(0.36 * bmp.width);
   const x1 = Math.round(0.64 * bmp.width);
@@ -119,7 +120,7 @@ function mouthLuma(bmp: Bitmap): Float64Array {
   return out;
 }
 
-/** Резкость: средний перепад яркости между соседями по строке. */
+/** Sharpness: mean luminance step between horizontal neighbours. */
 function sharpness(luma: Float64Array, width: number): number {
   let sum = 0;
   let n = 0;
@@ -136,7 +137,7 @@ const MOUTH_W = () => {
   return Math.round(0.64 * bmp.width) - Math.round(0.36 * bmp.width);
 };
 
-test("каждый кадр рта существует на диске", () => {
+test("every mouth frame exists on disk", () => {
   for (const rel of [
     ...Object.values(MOUTH_SPRITES),
     ...Object.values(HALF_SPRITES),
@@ -146,11 +147,12 @@ test("каждый кадр рта существует на диске", () => 
   }
 });
 
-test("вне зоны рта кадры идентичны — меняется только рот", () => {
-  // Иначе при смене визимы мерцает весь персонаж: мех, костюм, фон.
+test("outside the mouth region frames are identical — only the mouth changes", () => {
+  // Otherwise the whole character flickers on a viseme change: fur, suit, background.
   const rest = load(MOUTH_SPRITES.rest);
-  // Границы усекаем, как сборщик спрайтов (Python int()), а не округляем: иначе
-  // в проверку фона попадает однопиксельная рамка самой зоны рта.
+  // Truncate the bounds like the sprite builder does (Python int()) instead of
+  // rounding: otherwise a one-pixel rim of the mouth region itself lands in the
+  // background check.
   const x0 = Math.trunc(0.34 * rest.width);
   const x1 = Math.trunc(0.64 * rest.width);
   const y0 = Math.trunc(0.455 * rest.height);
@@ -167,14 +169,14 @@ test("вне зоны рта кадры идентичны — меняется 
         worst = Math.max(worst, Math.abs(bmp.luma[i] - rest.luma[i]));
       }
     }
-    expect(worst, `${name}: фон отличается от rest`).toBeLessThanOrEqual(8);
+    expect(worst, `${name}: background differs from rest`).toBeLessThanOrEqual(8);
   }
 });
 
-test("промежуточный кадр — настоящая поза, а не смесь закрытого с открытым", () => {
-  // Тот самый дефект: half = (rest + full) / 2 давал полупрозрачное наложение
-  // двух ртов. Такая смесь почти точно равна среднему, поэтому ловим по
-  // расстоянию до него: настоящая поза так близко к среднему не лежит.
+test("an intermediate frame is a real pose, not a blend of shut and open", () => {
+  // The defect in question: half = (rest + full) / 2 gave a semi-transparent
+  // overlay of two mouths. Such a blend is almost exactly the mean, so we catch it
+  // by distance to the mean: a real pose does not sit that close to it.
   const width = MOUTH_W();
   for (const key of Object.keys(HALF_SPRITES) as Array<keyof typeof HALF_SPRITES>) {
     const rest = mouthLuma(load(MOUTH_SPRITES.rest));
@@ -186,24 +188,24 @@ test("промежуточный кадр — настоящая поза, а н
       dist += Math.abs(half[i] - (rest[i] + full[i]) / 2);
     }
     dist /= half.length;
-    expect(dist, `${key}h слишком похож на альфа-смесь rest+full`).toBeGreaterThan(4);
+    expect(dist, `${key}h looks too much like an alpha blend of rest+full`).toBeGreaterThan(4);
 
-    // И он не должен быть мягче обоих: размытие — прямой признак наложения.
+    // And it must not be softer than either: blur is a direct sign of overlay.
     const sHalf = sharpness(half, width);
     const sRest = sharpness(rest, width);
-    expect(sHalf, `${key}h размытее закрытого рта`).toBeGreaterThan(sRest * 0.85);
+    expect(sHalf, `${key}h is blurrier than the closed mouth`).toBeGreaterThan(sRest * 0.85);
   }
 });
 
-test("промежуточный кадр не распахнут сильнее самой формы", () => {
-  // Полость рта темнее морды, поэтому «сколько потемнело против rest» —
-  // прямая мера того, насколько открыт рот.
+test("an intermediate frame is not opened wider than the shape itself", () => {
+  // The oral cavity is darker than the muzzle, so "how much darker than rest" is a
+  // direct measure of how far the mouth is open.
   //
-  // Строгое `half < full` требовать нельзя: у смычных и малоамплитудных визим
-  // (MBP, WQ, FV, U, E) полпути почти совпадает с самой формой, и генератор
-  // законно отдаёт их равными. Ловим только настоящую поломку — когда
-  // промежуточный кадр открыт ЗАМЕТНО шире конечного, то есть рот сначала
-  // распахивается, а потом захлопывается на той же визиме.
+  // We cannot demand strict `half < full`: for stops and low-amplitude visemes
+  // (MBP, WQ, FV, U, E) the halfway pose nearly coincides with the shape itself, and
+  // the generator legitimately returns them equal. We catch only the real breakage —
+  // when the intermediate frame is NOTICEABLY wider than the final one, i.e. the
+  // mouth flings open and then slams shut within the same viseme.
   const rest = mouthLuma(load(MOUTH_SPRITES.rest));
   const openness = (luma: Float64Array) => {
     let n = 0;
@@ -214,16 +216,16 @@ test("промежуточный кадр не распахнут сильнее
   for (const key of Object.keys(HALF_SPRITES) as Array<keyof typeof HALF_SPRITES>) {
     const half = openness(mouthLuma(load(HALF_SPRITES[key])));
     const full = openness(mouthLuma(load(MOUTH_SPRITES[key])));
-    expect(half, `${key}h должен быть приоткрыт`).toBeGreaterThan(0.01);
-    expect(half, `${key}h распахнут шире, чем ${key}`).toBeLessThan(full * 1.15);
+    expect(half, `${key}h should be partly open`).toBeGreaterThan(0.01);
+    expect(half, `${key}h is opened wider than ${key}`).toBeLessThan(full * 1.15);
   }
 });
 
-test("фазы одной визимы раскрываются строго по возрастанию", () => {
-  // Генератор не всегда попадает в заказанную амплитуду: у смычных /м/, /ф/
-  // «четверть» выходит шире «половины». Сборщик спрайтов переставляет фазы по
-  // факту, и этот порядок обязан держаться — иначе рот на такой визиме сначала
-  // откроется шире, а потом захлопнется посреди звука.
+test("phases of one viseme open in strictly increasing order", () => {
+  // The generator does not always hit the requested amplitude: for the stops /m/, /f/
+  // the "quarter" comes out wider than the "half". The sprite builder reorders phases
+  // by what they actually measure, and that order must hold — otherwise on such a
+  // viseme the mouth first opens wider and then slams shut mid-sound.
   const rest = mouthLuma(load(MOUTH_SPRITES.rest));
   const openness = (luma: Float64Array) => {
     let n = 0;
@@ -235,9 +237,9 @@ test("фазы одной визимы раскрываются строго п�
     const q = openness(mouthLuma(load(QUARTER_SPRITES[key])));
     const h = openness(mouthLuma(load(HALF_SPRITES[key])));
     const full = openness(mouthLuma(load(MOUTH_SPRITES[key])));
-    expect(q, `${key}: четверть шире половины (${q.toFixed(4)} > ${h.toFixed(4)})`)
+    expect(q, `${key}: quarter is wider than half (${q.toFixed(4)} > ${h.toFixed(4)})`)
       .toBeLessThanOrEqual(h);
-    expect(h, `${key}: половина шире полной формы (${h.toFixed(4)} > ${full.toFixed(4)})`)
+    expect(h, `${key}: half is wider than the full shape (${h.toFixed(4)} > ${full.toFixed(4)})`)
       .toBeLessThanOrEqual(full);
   }
 });

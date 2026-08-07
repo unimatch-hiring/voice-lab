@@ -3,14 +3,14 @@ import type { Transport } from "../transport";
 
 export interface SttDeps {
   transport: Transport;
-  /** Всегда rus для русской речи: на дефолтном eng Scribe выдаёт мусор. */
+  /** Always rus for Russian speech: on the default eng, Scribe returns garbage. */
   language?: string;
   fetchImpl?: typeof fetch;
 }
 
 const SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 
-/** logprob (≤0) → 0..1. exp даёт вероятность, это ровно то, что нам нужно показать. */
+/** logprob (≤0) → 0..1. exp gives the probability, which is exactly what we want to show. */
 function toConfidence(logprob: number | undefined): number {
   if (logprob === undefined) return 1;
   return Math.min(1, Math.max(0, Math.exp(logprob)));

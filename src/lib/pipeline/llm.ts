@@ -1,8 +1,13 @@
 import type { Transport, LlmMessage } from "../transport";
 
+/**
+ * Kept language-neutral on purpose: the reply must follow whatever language the
+ * speaker used, so the prompt states that rather than being written in one.
+ */
 export const SYSTEM_PROMPT =
-  "Ты голосовой ассистент. Отвечай коротко — одно-два предложения, без списков " +
-  "и markdown: твой ответ будет произнесён вслух. Отвечай на языке собеседника.";
+  "You are a voice assistant. Keep answers short — one or two sentences, no lists " +
+  "and no markdown: your reply will be spoken aloud. Always answer in the same " +
+  "language the user spoke.";
 
 export interface LlmDeps {
   transport: Transport;

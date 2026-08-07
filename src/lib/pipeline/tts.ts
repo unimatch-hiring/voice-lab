@@ -63,7 +63,7 @@ export async function* synthesize(text: string, deps: TtsDeps): AsyncIterable<Tt
   ws.onopen = () => {
     ws.send(JSON.stringify({ text: " ", voice_settings: { stability: 0.5, similarity_boost: 0.8 } }));
     ws.send(JSON.stringify({ text }));
-    ws.send(JSON.stringify({ text: "" })); // пустая строка закрывает ввод
+    ws.send(JSON.stringify({ text: "" })); // an empty string closes the input
   };
 
   ws.onmessage = (ev) => {

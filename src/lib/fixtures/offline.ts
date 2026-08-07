@@ -12,9 +12,9 @@ export interface Fixture {
 const sleep = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 
 /**
- * Стадии, читающие записанный turn вместо сети. Подставляются в тот же
- * Orchestrator, что и живые, — поэтому оффлайн-прогон проверяет реальный код,
- * а не отдельную ветку «для демо».
+ * Stages that read a recorded turn instead of the network. They plug into the same
+ * Orchestrator as the live ones, so an offline run exercises the real code path
+ * rather than a separate "demo mode" branch.
  */
 export function offlineStages(fixture: Fixture, delayMs = 120) {
   return {

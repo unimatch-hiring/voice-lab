@@ -26,9 +26,9 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # Адрес token-minter'а. Переменная репозитория, не секрет: она уезжает
-          # в бандл и видна в браузере — Worker защищён списком origin и токеном,
-          # а не тем, что его адрес неизвестен.
+          # The token-minter's address. A repository variable, not a secret: it ends
+          # up in the bundle and is visible in the browser — the Worker is protected
+          # by its origin list and the token, not by its address being unknown.
           VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:

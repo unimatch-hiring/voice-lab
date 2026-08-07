@@ -6,7 +6,7 @@ const VISEMES: readonly Viseme[] = [
   "rest", "MBP", "AI", "E", "O", "U", "FV", "L", "WQ",
 ];
 
-/** Кадр персонажа на визиму. Спрайты лежат в public/face/. */
+/** One character frame per viseme. Sprites live in public/face/. */
 export const MOUTH_SPRITES: Record<Viseme, string> = {
   rest: "face/rest.png",
   MBP: "face/MBP.png",
@@ -21,7 +21,7 @@ export const MOUTH_SPRITES: Record<Viseme, string> = {
 
 type Shape = Exclude<Viseme, "rest">;
 
-/** Четверть раскрытия (`*q`) — первая треть пути челюсти. */
+/** Quarter-open phase (`*q`) — the first third of the jaw's travel. */
 export const QUARTER_SPRITES: Record<Shape, string> = {
   MBP: "face/MBPq.png",
   AI: "face/AIq.png",
@@ -33,7 +33,7 @@ export const QUARTER_SPRITES: Record<Shape, string> = {
   WQ: "face/WQq.png",
 };
 
-/** Полуоткрытая фаза (`*h`) — середина пути челюсти. */
+/** Half-open phase (`*h`) — midway through the jaw's travel. */
 export const HALF_SPRITES: Record<Shape, string> = {
   MBP: "face/MBPh.png",
   AI: "face/AIh.png",
@@ -62,18 +62,18 @@ function spriteOf(key: FrameKey): string {
 }
 
 /**
- * Кадры одной визимы по возрастанию раскрытия. Сборщик спрайтов гарантирует
- * этот порядок по факту (он переставляет фазы, если генератор промахнулся), так
- * что интерполировать между соседями безопасно.
+ * Frames of one viseme in increasing openness. The sprite builder enforces this
+ * order empirically (it swaps phases when the generator misses), so
+ * interpolating between neighbours is safe.
  */
 function phasesOf(shape: Shape): readonly FrameKey[] {
   return ["rest", `${shape}q` as FrameKey, `${shape}h` as FrameKey, shape as FrameKey];
 }
 
 /**
- * Целевая амплитуда раскрытия на визиму. Спрайты сняты широко открытыми, но
- * фонемы раскрывают рот по-разному: /м/ смыкает губы, /а/ распахивает.
- * Замер тёмной полости по кадрам: MBP/WQ/FV/U ~17-19%, E/O/L ~23-25%, AI ~26%.
+ * Target openness per viseme. The sprites were drawn wide open, but phonemes
+ * open the mouth to different degrees: /m/ closes the lips, /a/ flings them open.
+ * Dark-cavity measurement across frames: MBP/WQ/FV/U ~17-19%, E/O/L ~23-25%, AI ~26%.
  */
 const OPENNESS: Record<Viseme, number> = {
   rest: 0,
@@ -88,32 +88,33 @@ const OPENNESS: Record<Viseme, number> = {
 };
 
 /**
- * Сглаживание амплитуды за кадр (экспоненциальное, ~200 мс до цели). Челюсть —
- * инерционная механика: она не прыгает между формами, а едет к цели. Именно
- * этого не давала прежняя схема «дискретный кадр + CSS-fade»: на 10-15 сменах
- * в секунду fade не успевал завершиться, кадры мелькали по 16 мс и всё
- * читалось как дрожь. Здесь дрожать нечему — амплитуда непрерывна.
+ * Per-frame amplitude smoothing (exponential, ~200 ms to target). The jaw is
+ * inertial mechanics: it travels toward a target instead of snapping between
+ * shapes. That is exactly what the old "discrete frame + CSS fade" scheme could
+ * not do: at 10-15 changes per second the fade never finished, frames flashed
+ * for 16 ms each and the whole thing read as jitter. Here there is nothing to
+ * jitter — the amplitude is continuous.
  *
- * Цена сглаживания — рот не доходит до крайних форм и отстаёт от звука, но она
- * мала: замер на русской фикстуре даёт размах 0.81 из 0.90 и запаздывание 33 мс
- * (на глаз незаметно), тогда как рывок падает в 3.5 раза против 0.014.
+ * Smoothing costs us full extremes and some lag behind the audio, but not much:
+ * on the Russian fixture the range is 0.81 out of 0.90 with 33 ms of lag
+ * (invisible to the eye), while the jerk drops 3.5x, to 0.014.
  */
 const SMOOTH_PER_MS = 0.005;
 
-/** Шаг кадра анимации при 60 Hz — по нему идёт инерция челюсти. */
+/** Animation frame step at 60 Hz — the clock the jaw's inertia runs on. */
 const FRAME_MS = 16.7;
 
 /**
- * Минимум, сколько держится ФОРМА рта (какой из восьми кадров показываем).
- * Референсная практика 2D-липсинка — frame-holding на ~3 кадра: без него форма
- * скачет чаще, чем глаз способен прочитать как артикуляцию.
+ * Minimum hold time for the mouth SHAPE (which of the eight frames we show).
+ * Standard 2D lip-sync practice is frame-holding for ~3 frames: without it the
+ * shape changes faster than the eye can read as articulation.
  */
 const SHAPE_HOLD_MS = 150;
 
 /**
- * Мёртвая зона у закрытого рта: ниже этого раскрытия рот считаем сомкнутым.
- * Амплитуда не обрубается на пороге, а растягивается от него — иначе на входе
- * в речь рот открывался рывком.
+ * Dead zone near the closed mouth: below this openness we treat it as shut.
+ * The amplitude is rescaled from the threshold rather than clipped at it —
+ * otherwise the mouth popped open on every entry into speech.
  */
 const CLOSED_BELOW = 0.12;
 
@@ -129,12 +130,12 @@ export function Mouth({
   useEffect(() => {
     let raf = 0;
     let openness = 0;
-    // Форма живёт своей шкалой: цель приходит из таймлайна, но меняем её не
-    // чаще SHAPE_HOLD_MS, иначе рот перебирает формы быстрее, чем видно.
+    // The shape runs on its own clock: the target comes from the timeline, but
+    // we switch no more often than SHAPE_HOLD_MS, or it cycles faster than visible.
     let shape: Exclude<Viseme, "rest"> = "AI";
     let shapeAt = -Infinity;
-    // Какие кадры сейчас подсвечены — чтобы гасить их при смене формы, а не
-    // перебирать все 25 на каждом тике.
+    // Which frames are currently lit — so we can dim those on a shape change
+    // instead of walking all 25 every tick.
     let lit: FrameKey[] = [];
 
     const setOpacity = (key: FrameKey, value: number) => {
@@ -144,10 +145,10 @@ export function Mouth({
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      // Шкал две, и это осознанно. ЦЕЛЬ раскрытия читаем по плейхеду аудио —
-      // иначе рот разошёлся бы со звуком. А вот ИНЕРЦИЮ челюсти считаем по
-      // кадрам анимации: пока аудио на паузе, `elapsedMs` не растёт, и по нему
-      // рот застыл бы на полпути к форме.
+      // Two clocks, deliberately. The openness TARGET is read off the audio
+      // playhead — otherwise the mouth would drift out of sync with the sound.
+      // The jaw's INERTIA runs on animation frames: while audio is paused
+      // `elapsedMs` does not advance, so the mouth would freeze mid-travel.
       const now = playback.elapsedMs;
       const viseme = timeline.at(now);
       if (viseme !== "rest" && viseme !== shape && now - shapeAt >= SHAPE_HOLD_MS) {
@@ -155,23 +156,23 @@ export function Mouth({
         shapeAt = now;
       }
 
-      // Экспоненциальное приближение к цели: величина шага пропорциональна
-      // остатку, поэтому старт быстрый, а подход к форме мягкий.
+      // Exponential approach to the target: step size is proportional to the
+      // remaining distance, so it starts fast and eases into the shape.
       const target = OPENNESS[viseme];
       const k = 1 - Math.exp(-SMOOTH_PER_MS * FRAME_MS);
       openness += (target - openness) * k;
 
-      // Амплитуду раскладываем по четырём кадрам (rest -> q -> h -> полный):
-      // находим сегмент, в котором находимся, и показываем ровно двух соседей с
-      // весами, дающими в СУММЕ единицу. Постоянная сумма принципиальна: пока
-      // слои складывались, на второй половине раскрытия горели два кадра по
-      // 100%, суммарная плотность доходила до 2.0 и это читалось как рывок
-      // посередине движения. Три сегмента вместо одного дают вчетверо меньший
-      // шаг между соседними позами.
+      // Spread the amplitude across four frames (rest -> q -> h -> full): find
+      // the segment we are in and show exactly two neighbours with weights that
+      // SUM to one. The constant sum matters: back when layers stacked, the
+      // second half of the opening lit two frames at 100%, total density reached
+      // 2.0 and it read as a jerk mid-motion. Three segments instead of one give
+      // a four times smaller step between adjacent poses.
       const phases = phasesOf(shape);
-      // Порог тишины растягиваем, а не обрубаем. Пока он просто обнулял
-      // амплитуду, на его пересечении сумма непрозрачности прыгала с 0 сразу на
-      // 0.36 — рот «включался» рывком на каждом входе в речь.
+      // Rescale from the silence threshold instead of clipping at it. While it
+      // simply zeroed the amplitude, crossing it made total opacity jump from 0
+      // straight to 0.36 — the mouth "switched on" with a jerk on every entry
+      // into speech.
       const t = Math.min(
         1,
         Math.max(0, (openness - CLOSED_BELOW) / (1 - CLOSED_BELOW)),
@@ -187,8 +188,8 @@ export function Mouth({
       lit = [lower, upper];
       if (lower !== "rest") setOpacity(lower, 1 - frac);
       setOpacity(upper, frac);
-      // Закрытый кадр — подложка: остальные слои проявляются поверх него,
-      // поэтому шва между «закрыто» и «приоткрыто» не видно.
+      // The closed frame is the backdrop: every other layer fades in on top of
+      // it, so there is no visible seam between "shut" and "slightly open".
       setOpacity("rest", 1);
     };
 
@@ -197,7 +198,7 @@ export function Mouth({
   }, [timeline, playback]);
 
   return (
-    <figure className="mouth-frame" aria-label="Артикуляция ответа">
+    <figure className="mouth-frame" aria-label="Response articulation">
       <div className="mouth-stack">
         {FRAME_KEYS.map((k) => (
           <img
@@ -209,8 +210,8 @@ export function Mouth({
             src={`${import.meta.env.BASE_URL}${spriteOf(k)}`}
             alt=""
             draggable={false}
-            // Ноль CSS-переходов: амплитуду ведёт rAF, а transition поверх неё
-            // добавил бы второй, независимый источник времени.
+            // Zero CSS transitions: rAF drives the amplitude, and a transition
+            // on top would add a second, independent source of timing.
             style={{ opacity: k === "rest" ? 1 : 0 }}
           />
         ))}

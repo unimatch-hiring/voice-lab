@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Собирает спрайты рта из сгенерированных кадров в public/face/.
+"""Builds the mouth sprites in public/face/ from the generated frames.
 
-Два неочевидных требования, каждое стоило заметного времени отладки:
+Two non-obvious requirements, each of which cost real debugging time:
 
-1. Вне зоны рта все кадры обязаны быть ПОБИТОВО одинаковыми. Генератор
-   перерисовывает картинку целиком, поэтому мех, костюм и фон гуляют — при
-   смене визимы мерцает весь персонаж. Лечится композитом: один фон + вклеенная
-   область рта под размытой маской.
+1. Outside the mouth region every frame must be BIT-IDENTICAL. The generator
+   repaints the whole image, so fur, suit and background drift and the entire
+   character shimmers on a viseme change. Fixed by compositing: one background
+   plus the mouth region pasted through a blurred mask.
 
-2. Палитру считаем ОДИН раз на все кадры. Независимая адaptive-палитра на кадр
-   расходится на единицы значений, и «идентичный» фон снова начинает дрожать.
+2. The palette is computed ONCE for all frames. A per-frame adaptive palette
+   drifts by a few values and the "identical" background starts flickering again.
 
-Проверяет результат тест src/scene/sprites.test.ts.
+Verified by src/scene/sprites.test.ts.
 """
 
 import os
@@ -22,11 +22,11 @@ from PIL import Image, ImageDraw, ImageFilter
 SRC = sys.argv[1] if len(sys.argv) > 1 else "/tmp/vl-face/racoon"
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "face")
 
-WORK = 768          # разрешение композита
-FINAL = 384         # что кладём в public: окно рендерится в ~400px
+WORK = 768          # composite resolution
+FINAL = 384         # what lands in public: the window renders at ~400px
 COLORS = 220
 
-# Зона рта в долях кадра — подобрана по сетке на эталоне.
+# Mouth region as a fraction of the frame — measured off a grid on the reference.
 X0, X1, Y0, Y1 = 0.34, 0.64, 0.455, 0.615
 
 VISEMES = ["MBP", "AI", "E", "O", "U", "FV", "L", "WQ"]
@@ -37,8 +37,8 @@ def mouth_mask(size: int) -> Image.Image:
     blur = size * 0.022
     pad = int(blur * 1.5)
     mask = Image.new("L", (size, size), 0)
-    # Эллипс уменьшен на радиус размытия, иначе маска расползается за box и
-    # тянет за собой фон, который обязан остаться неизменным.
+    # The ellipse is shrunk by the blur radius, otherwise the mask spreads past the
+    # box and drags along background that has to stay untouched.
     ImageDraw.Draw(mask).ellipse(
         (box[0] + pad, box[1] + pad, box[2] - pad, box[3] - pad), fill=255
     )
@@ -52,7 +52,7 @@ def mouth_mask(size: int) -> Image.Image:
 def main() -> int:
     base_path = os.path.join(SRC, "base.png")
     if not os.path.exists(base_path):
-        print(f"нет эталона: {base_path}", file=sys.stderr)
+        print(f"missing reference: {base_path}", file=sys.stderr)
         return 1
 
     base = Image.open(base_path).convert("RGB").resize((WORK, WORK), Image.LANCZOS)
@@ -60,22 +60,21 @@ def main() -> int:
 
     frames = {"rest": base.copy()}
     for name in VISEMES:
-        # Три фазы раскрытия на визиму: q (четверть) -> h (половина) -> полная.
-        # С двумя точками шаг амплитуды между соседними кадрами слишком велик и
-        # кроссфейд читается как рывок.
+        # Three opening phases per viseme: q (quarter) -> h (half) -> full. With
+        # only two points the amplitude step between neighbouring frames is large
+        # enough that the crossfade reads as a jolt.
         for suffix in ("", "h", "q"):
             path = os.path.join(SRC, f"{name}{suffix}.png")
             if not os.path.exists(path):
-                print(f"пропуск (нет кадра): {name}{suffix}")
+                print(f"skipping (no frame): {name}{suffix}")
                 continue
             src = Image.open(path).convert("RGB").resize((WORK, WORK), Image.LANCZOS)
             frames[f"{name}{suffix}"] = Image.composite(src, base, mask)
 
-    # Фазы сортируем по ФАКТИЧЕСКОМУ раскрытию, а не по имени файла: генератор
-    # не всегда попадает в заказанную амплитуду (у смычных /ф/, /м/ «четверть» и
-    # «половина» выходят почти одинаковыми и иногда меняются местами). Если
-    # оставить порядок по имени, рот на такой визиме сначала откроется шире, а
-    # потом захлопнется — это видимый рывок.
+    # Order phases by MEASURED openness rather than by filename: the generator does
+    # not always hit the requested amplitude (on stops like /f/ and /m/ the quarter
+    # and the half come out nearly equal and sometimes swap). Keeping filename order
+    # would open the mouth wider and then snap it shut mid-viseme — a visible jolt.
     def openness(img: Image.Image) -> float:
         ref = frames["rest"].convert("L").crop(
             (int(0.36 * WORK), int(0.46 * WORK), int(0.64 * WORK), int(0.62 * WORK))
@@ -94,17 +93,18 @@ def main() -> int:
             continue
         by_open = sorted(phases, key=lambda p: openness(frames[p]))
         if by_open != phases:
-            print(f"  {name}: фазы переставлены по факту -> {' < '.join(by_open)}")
+            print(f"  {name}: phases reordered by measurement -> {' < '.join(by_open)}")
             reordered = {slot: frames[src] for slot, src in zip(phases, by_open)}
             frames.update(reordered)
 
     order = list(frames)
     small = {n: frames[n].resize((FINAL, FINAL), Image.LANCZOS) for n in order}
 
-    # Вне зоны рта берём пиксели ИЗ rest, а не свои. Композит уже делал фон
-    # одинаковым, но квантование в палитру назначало соседним оттенкам разные
-    # индексы, и фон снова расходился на десятки уровней — вся морда дрожала при
-    # смене визимы. Здесь расхождение невозможно по построению.
+    # Outside the mouth, take pixels FROM rest rather than each frame's own. The
+    # composite already made the background equal, but quantising to a palette gave
+    # neighbouring shades different indices and the background drifted by tens of
+    # levels again — the whole face shimmered on a viseme change. Here drift is
+    # impossible by construction.
     keep = Image.new("L", (FINAL, FINAL), 0)
     keep.paste(
         255,
@@ -119,7 +119,7 @@ def main() -> int:
         if name != "rest":
             small[name] = Image.composite(small[name], small["rest"], keep)
 
-    # Общая палитра на все кадры: одна и та же таблица цветов у всех файлов.
+    # One shared palette for every frame: the same colour table in all files.
     sheet = Image.new("RGB", (FINAL, FINAL * len(order)))
     for i, name in enumerate(order):
         sheet.paste(small[name], (0, i * FINAL))
@@ -132,9 +132,9 @@ def main() -> int:
         path = os.path.join(OUT, f"{name}.png")
         out.save(path, optimize=True)
         total += os.path.getsize(path)
-        print(f"  {name:6} {os.path.getsize(path) / 1024:6.1f} КБ")
+        print(f"  {name:6} {os.path.getsize(path) / 1024:6.1f} KB")
 
-    print(f"итого: {total / 1024 / 1024:.2f} МБ, кадров: {len(order)}")
+    print(f"total: {total / 1024 / 1024:.2f} MB across {len(order)} frames")
     return 0
 
 

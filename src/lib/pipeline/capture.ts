@@ -1,4 +1,4 @@
-/** Кадр анализа микрофона: сэмплы окна и их среднеквадратичный уровень. */
+/** One microphone analysis frame: the window's samples and their RMS level. */
 export interface CaptureFrame {
   samples: Float32Array;
   rms: number;
@@ -6,11 +6,11 @@ export interface CaptureFrame {
 }
 
 export interface RecorderOptions {
-  /** Вызывается ~на каждый кадр анимации, пока идёт запись. */
+  /** Called about once per animation frame while recording. */
   onFrame?: (frame: CaptureFrame) => void;
 }
 
-/** Запись с микрофона. Отдаёт webm-блоб, который принимает Scribe. */
+/** Microphone recording. Returns a webm blob that Scribe accepts. */
 export class Recorder {
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
@@ -38,7 +38,7 @@ export class Recorder {
     if (this.opts.onFrame) this.startAnalysis(this.stream, this.opts.onFrame);
   }
 
-  /** Живой уровень входа: MediaRecorder отдаёт только сжатый блоб, сэмплов в нём нет. */
+  /** Live input level: MediaRecorder only hands back a compressed blob, with no samples in it. */
   private startAnalysis(stream: MediaStream, onFrame: (f: CaptureFrame) => void): void {
     this.ctx = new AudioContext();
     const analyser = this.ctx.createAnalyser();

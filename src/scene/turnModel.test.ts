@@ -21,13 +21,13 @@ test("a repeated start closes the previous span instead of leaking it", () => {
 
   const spans = m.visible(600, 6000);
   expect(spans).toHaveLength(2);
-  expect(spans[0].end).toBe(500); // первый закрыт, а не растёт вечно
+  expect(spans[0].end).toBe(500); // the first one is closed, not growing forever
 });
 
 test("overlapping stages are both visible", () => {
   const m = new TurnModel();
   m.apply({ type: "stage-start", stage: "llm", at: 100 });
-  m.apply({ type: "stage-start", stage: "tts", at: 300 }); // начался до конца llm
+  m.apply({ type: "stage-start", stage: "tts", at: 300 }); // started before llm ended
 
   const stages = m.visible(400, 6000).map((s) => s.stage);
   expect(stages).toEqual(["llm", "tts"]);
@@ -39,7 +39,7 @@ test("prune drops spans that scrolled out of the window", () => {
   m.apply({ type: "stage-end", stage: "stt", at: 100, ttfbMs: 100 });
   m.apply({ type: "stage-start", stage: "llm", at: 9000 });
 
-  m.prune(10_000, 6000); // окно 6 с: спан на 0..100 уехал
+  m.prune(10_000, 6000); // 6s window: the 0..100 span has scrolled out
 
   expect(m.visible(10_000, 6000).map((s) => s.stage)).toEqual(["llm"]);
 });
@@ -47,7 +47,7 @@ test("prune drops spans that scrolled out of the window", () => {
 test("prune actually shrinks the span store, not just the visible slice", () => {
   const m = new TurnModel();
 
-  // 300 давно закрытых спанов — все за пределами окна.
+  // 300 long-closed spans, all outside the window.
   for (let i = 0; i < 300; i++) {
     m.apply({ type: "stage-start", stage: "stt", at: i * 10 });
     m.apply({ type: "stage-end", stage: "stt", at: i * 10 + 5, ttfbMs: 5 });
@@ -83,12 +83,12 @@ test("counts tokens and tracks the latest audio level", () => {
 test("activeStage reports the most recently started of several open stages", () => {
   const m = new TurnModel();
   m.apply({ type: "stage-start", stage: "llm", at: 100 });
-  m.apply({ type: "stage-start", stage: "tts", at: 300 }); // начался до конца llm
-  m.apply({ type: "stage-start", stage: "playback", at: 450 }); // и до конца tts
+  m.apply({ type: "stage-start", stage: "tts", at: 300 }); // started before llm ended
+  m.apply({ type: "stage-start", stage: "playback", at: 450 }); // and before tts ended
 
   expect(m.activeStage).toBe("playback");
 
-  // Закрылась самая поздняя — активной становится предыдущая по времени старта.
+  // The latest one closed, so the previous by start time becomes active.
   m.apply({ type: "stage-end", stage: "playback", at: 500, ttfbMs: 50 });
   expect(m.activeStage).toBe("tts");
 });

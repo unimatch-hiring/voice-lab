@@ -55,12 +55,12 @@ body {
   will-change: transform;
 }
 
-/* Окно персонажа: квадратная оправа, чтобы кадр читался как прибор, а не как
-   картинка, брошенная на страницу. */
+/* Character window: a square bezel so the frame reads as an instrument rather than
+   an image dropped onto the page. */
 .mouth-frame {
   margin: 0;
-  /* На узком экране окно съезжает в ширину колонки, но не мельчает ниже 260px —
-     на фотореалистичной морде мелкий кадр не даёт разглядеть артикуляцию. */
+  /* On a narrow screen the window shrinks to the column width but never below
+     260px: on a photorealistic face a small frame hides the articulation. */
   width: clamp(260px, 46vw, 420px);
   padding: 12px;
   border-radius: 18px;

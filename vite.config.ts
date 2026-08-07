@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Dev server on :5173. base — подпуть GitHub Pages (см. Task 16).
+// Dev server on :5173. base is the GitHub Pages sub-path.
 export default defineConfig({
   base: "/voice-lab/",
   plugins: [react()],

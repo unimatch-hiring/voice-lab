@@ -38,8 +38,8 @@ test("llmStream yields tokens parsed out of the SSE body", async () => {
   expect(out).toEqual(["При", "вет"]);
 });
 
-// Стримом кадр может прийти разорванным между двумя read() — единственная
-// нетривиальная логика в модуле (перенос неполного хвоста в буфер).
+// A frame can arrive split across two read() calls — the only non-trivial logic
+// in the module (carrying the incomplete tail over in the buffer).
 function chunkedResponse(body: string, cutAt: number): Response {
   const enc = new TextEncoder();
   const parts = [body.slice(0, cutAt), body.slice(cutAt)];
@@ -58,7 +58,7 @@ function chunkedResponse(body: string, cutAt: number): Response {
 test("llmStream yields the last token even when the stream ends without [DONE] or a trailing blank line", async () => {
   const sse = [
     'data: {"choices":[{"delta":{"content":"При"}}]}\n\n',
-    'data: {"choices":[{"delta":{"content":"вет"}}]}', // обрыв: нет \n\n и нет [DONE]
+    'data: {"choices":[{"delta":{"content":"вет"}}]}', // cut off: no \n\n and no [DONE]
   ].join("");
   const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }));
   const t = createTransport(cfg, fetchMock);
@@ -75,7 +75,7 @@ test("llmStream reassembles an SSE frame split across two stream chunks", async 
     'data: {"choices":[{"delta":{"content":"вет"}}]}\n\n',
     "data: [DONE]\n\n",
   ].join("");
-  const cutAt = sse.indexOf('"вет"'); // разрез внутри второго кадра
+  const cutAt = sse.indexOf('"вет"'); // cut inside the second frame
 
   const fetchMock = vi.fn().mockResolvedValue(chunkedResponse(sse, cutAt));
   const t = createTransport(cfg, fetchMock);

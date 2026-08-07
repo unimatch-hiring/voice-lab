@@ -16,9 +16,8 @@ import { Mouth } from "./scene/Mouth";
 import "./scene/tokens.css";
 
 export function App() {
-  // Токен приходит из IndexedDB, то есть асинхронно, — поэтому конфиг живёт в
-  // состоянии. Первый рендер идёт в офлайне и переключается на живой режим, как
-  // только токен прочитан.
+  // The token comes from IndexedDB, i.e. asynchronously, so config lives in state.
+  // The first render is offline and flips to live mode once the token is read.
   const [storedToken, setStoredToken] = useState("");
   const [tokenReady, setTokenReady] = useState(false);
   const config = useMemo(() => loadConfig(storedToken), [storedToken]);
@@ -42,8 +41,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Живой вход: уровень идёт в сцену на каждый кадр, VAD размечает границы речи
-  // как стадии capture и vad. Без этого две полосы конвейера остаются пустыми.
+  // Live input: the level goes to the scene every frame and the VAD marks speech
+  // boundaries as the capture and vad stages. Without it two lanes stay empty.
   const recorder = useMemo(() => {
     const vad = new EnergyVad();
     return new Recorder({
@@ -82,9 +81,9 @@ export function App() {
     if (holding.current) return;
     holding.current = true;
     setError(null);
-    // Оффлайн-турн не запускаем здесь: setBusy(true) до mouseup успевает
-    // выставить disabled на кнопке, и браузер съедает mouseup — держать
-    // не отпустить. Турн запускается из stop(), как и в живом режиме.
+    // Do not start the offline turn here: setBusy(true) before mouseup disables the
+    // button, the browser swallows the mouseup, and the press never releases. The
+    // turn starts from stop(), same as in live mode.
     if (!config.offline) {
       try {
         bus.emit({ type: "stage-start", stage: "capture", at: performance.now() });
@@ -122,8 +121,8 @@ export function App() {
     <main style={{ maxWidth: 860, margin: "0 auto", padding: "32px 20px" }}>
       <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>voice-lab</h1>
       <p style={{ color: "rgba(16,21,28,0.6)", marginTop: 0 }}>
-        Скажи фразу и посмотри, как она течёт по конвейеру голосового агента.
-        {config.offline && " Сейчас офлайн-режим: играют записанные фикстуры."}
+        Say a phrase and watch it flow through a voice-agent pipeline.
+        {config.offline && " Offline right now: replaying recorded fixtures."}
       </p>
 
       <button
@@ -133,7 +132,7 @@ export function App() {
         disabled={busy}
         style={{ padding: "10px 18px", fontSize: 15, borderRadius: 8, cursor: "pointer" }}
       >
-        {busy ? "обработка…" : config.offline ? "прогнать фикстуру" : "держи и говори"}
+        {busy ? "working…" : config.offline ? "run a fixture" : "hold and speak"}
       </button>
 
       {error && (
@@ -154,9 +153,9 @@ export function App() {
 }
 
 /**
- * Ввод клиентского токена прямо на странице. Публичная сборка приходит без
- * токена (иначе платная квота досталась бы каждому посетителю), поэтому живой
- * конвейер включается здесь — и на задеплоенном сайте, без локальной сборки.
+ * Client token entry, right on the page. The published build ships without a token
+ * (otherwise our paid quota would go to every visitor), so this is where the live
+ * pipeline is unlocked — including on the deployed site, with no local build.
  */
 function TokenGate({
   token,
@@ -171,7 +170,7 @@ function TokenGate({
   if (token) {
     return (
       <p style={{ fontSize: 13, color: "rgba(16,21,28,0.6)", marginTop: 12 }}>
-        Живой режим включён.{" "}
+        Live mode is on.{" "}
         <button
           type="button"
           onClick={async () => {
@@ -188,7 +187,7 @@ function TokenGate({
             textDecoration: "underline",
           }}
         >
-          отключить
+          turn off
         </button>
       </p>
     );
@@ -212,9 +211,9 @@ function TokenGate({
         type="password"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="токен для живого режима"
-        // Не autoComplete: это не пароль пользователя, менеджерам паролей его
-        // предлагать незачем.
+        placeholder="token for live mode"
+        // No autoComplete: this is not the user's own password, no reason to offer
+        // it to password managers.
         autoComplete="off"
         spellCheck={false}
         style={{
@@ -230,7 +229,7 @@ function TokenGate({
         disabled={saving || !draft.trim()}
         style={{ padding: "7px 14px", fontSize: 13, borderRadius: 6, cursor: "pointer" }}
       >
-        включить
+        enable
       </button>
     </form>
   );

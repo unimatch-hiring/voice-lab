@@ -1,10 +1,10 @@
 const ALLOWED_TOKEN_TYPES = new Set(["batch_scribe", "realtime_scribe", "tts_websocket"]);
 
 /**
- * ALLOWED_ORIGINS — запятая-разделённый список в переменной окружения, например:
+ * ALLOWED_ORIGINS is a comma-separated list in an environment variable, e.g.:
  *   "https://unimatch-hiring.github.io,http://localhost:5173"
- * Origin в ответе echo-им (а не пишем `*`), поэтому обязателен `Vary: Origin`:
- * без него CDN может отдать закэшированный заголовок чужому origin.
+ * We echo the request Origin back instead of writing `*`, so `Vary: Origin` is
+ * mandatory: without it a CDN can serve a cached header to a different origin.
  */
 function corsHeaders(req, env) {
   const origin = req.headers.get("origin") ?? "";
@@ -19,7 +19,7 @@ function corsHeaders(req, env) {
     "access-control-allow-origin": origin,
     "access-control-allow-headers": "content-type,x-vibe-token",
     "access-control-allow-methods": "POST,OPTIONS",
-    "access-control-max-age": "86400", // сутки: не гонять preflight на каждый запрос
+    "access-control-max-age": "86400", // a day: no preflight on every request
     vary: "Origin",
   };
 }
@@ -33,8 +33,8 @@ export default {
         headers: { "content-type": "application/json", ...(cors ?? {}) },
       });
 
-    // Чужой origin: preflight не подтверждаем, браузер сам заблокирует запрос.
-    // Тело без CORS-заголовков всё равно недоступно вызывающей странице.
+    // Unknown origin: we do not confirm the preflight, the browser blocks the
+    // request itself. A body without CORS headers is unreadable to the caller anyway.
     if (!cors) return json({ error: "origin not allowed" }, 403);
 
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
@@ -57,8 +57,8 @@ export default {
       });
     }
 
-    // Текст, не аудио: у OpenRouter одноразовых токенов нет, поэтому LLM проксируем.
-    // Модель — за конфигом, менять её в клиенте не нужно.
+    // Text, not audio: OpenRouter has no single-use tokens, so we proxy the LLM.
+    // The model sits behind config; the client has no reason to change it.
     if (path === "/llm") {
       const body = await req.json();
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -75,7 +75,7 @@ export default {
         }),
       });
       if (!r.ok) return json({ error: "upstream failed", status: r.status }, 502);
-      // SSE через CORS: тело стримим как есть, заголовки — те же самые.
+      // SSE across CORS: stream the body as-is, same headers as everything else.
       return new Response(r.body, {
         headers: { "content-type": "text/event-stream", ...cors },
       });

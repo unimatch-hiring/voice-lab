@@ -17,8 +17,8 @@ const GROUPS: Array<[Viseme, string]> = [
   ["E", "eеэeэ"],
   ["O", "oоё"],
   ["U", "uую"],
-  // Прочие согласные тоже смыкают рот, но не в «покой»: гримаса L ближе всего
-  // к их артикуляции и не роняет челюсть до конца.
+  // Other consonants close the mouth too, but not all the way to rest: the L shape
+  // is closest to how they are articulated and doesn't drop the jaw fully.
   ["L", "gгkкxхhчшщжrрvj"],
 ];
 
@@ -28,15 +28,15 @@ for (const [viseme, chars] of GROUPS) {
 }
 
 /**
- * `rest` — только на реальной паузе (пробел, знак препинания). Раньше сюда же
- * падала любая неизвестная согласная, поэтому рот захлопывался наглухо между
- * слогами ~15 раз в секунду и анимация читалась как дёрганье, а не как речь.
+ * `rest` only on a real pause (space, punctuation). Any unknown consonant used to
+ * land here too, so the mouth slammed shut between syllables ~15 times a second
+ * and the animation read as twitching rather than speech.
  */
 export function charToViseme(ch: string): Viseme {
   return MAP.get(ch.toLowerCase()) ?? "rest";
 }
 
-/** Копит абсолютный таймлайн рта из чанков TTS. */
+/** Accumulates an absolute mouth timeline from TTS chunks. */
 export class VisemeTimeline {
   private frames: VisemeFrame[] = [];
   private offsetMs = 0;
@@ -64,7 +64,7 @@ export class VisemeTimeline {
   }
 
   at(elapsedMs: number): Viseme {
-    // Кадров на фразу — сотни, линейного поиска с конца достаточно и он проще бинарного.
+    // Hundreds of frames per phrase: a linear scan from the end is enough and simpler than binary search.
     for (let i = this.frames.length - 1; i >= 0; i--) {
       const f = this.frames[i];
       if (elapsedMs >= f.startMs && elapsedMs < f.endMs) return f.viseme;

@@ -46,7 +46,7 @@ export class Orchestrator {
     this.deps.bus.emit(e);
   }
 
-  /** Прогоняет стадию, меряет её и записывает TTFB в метрики. */
+  /** Runs a stage, times it and records the TTFB into the metrics. */
   private async stage<T>(name: StageName, metrics: TurnMetrics, fn: () => Promise<T>): Promise<T> {
     const started = this.now();
     this.emit({ type: "stage-start", stage: name, at: started });

@@ -5,9 +5,9 @@ import { EventBus } from "../lib/events";
 import type { StageName } from "../lib/types";
 
 /**
- * Guardrail для правила из CLAUDE.md: высокочастотные данные живут в refs.
- * Считаем вызовы самой функции Waterfall — setState внутри неё перерисовывает
- * её саму, а не обёртку, поэтому счётчик должен стоять на компоненте.
+ * Guardrail for the CLAUDE.md rule: high-frequency data lives in refs. We count
+ * calls to the Waterfall function itself — a setState inside it re-renders that
+ * component, not a wrapper, so the counter has to sit on the component.
  */
 function countingWaterfall() {
   let renders = 0;

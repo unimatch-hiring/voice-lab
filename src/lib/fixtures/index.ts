@@ -4,7 +4,7 @@ import { offlineStages, type Fixture } from "./offline";
 export { offlineStages };
 export type { Fixture };
 
-/** Разбивает фразу на чанки, как это делает websocket TTS: время внутри чанка — от его начала. */
+/** Splits a phrase into chunks the way the websocket TTS does: timings inside a chunk are relative to its start. */
 function chunksFromText(text: string, msPerChar = 55, charsPerChunk = 40): TtsChunk[] {
   const chunks: TtsChunk[] = [];
   for (let offset = 0; offset < text.length; offset += charsPerChunk) {
@@ -41,7 +41,7 @@ const REPLY_EN = "Hi. Your voice just travelled through six pipeline stages.";
 export const FIXTURES: Fixture[] = [
   {
     id: "ru-hello",
-    label: "Русская фраза, чистая запись",
+    label: "Russian phrase, clean recording",
     stt: sttOf("Привет, расскажи, как ты устроен"),
     reply: REPLY_RU,
     chunks: chunksFromText(REPLY_RU),
