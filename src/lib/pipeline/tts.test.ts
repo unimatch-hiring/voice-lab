@@ -90,3 +90,22 @@ test("skips a final frame that carries alignment but no audio", async () => {
   expect(out).toHaveLength(1);
   expect(out[0].chars).toEqual(["а"]);
 });
+
+test("authenticates the socket with single_use_token", async () => {
+  // With `authorization=<token>` the socket closes with 1008 ("none of the
+  // authentication methods were found") and no speech is ever produced. The
+  // fixtures skip this socket entirely, so nothing else catches a regression here.
+  const urls: string[] = [];
+  const { factory } = fakeSocket([{ isFinal: true }]);
+  const socketFactory = (u: string) => {
+    urls.push(u);
+    return factory();
+  };
+
+  for await (const _ of synthesize("hi", { transport, socketFactory })) {
+    /* drain */
+  }
+
+  expect(urls[0]).toContain("single_use_token=tok");
+  expect(urls[0]).not.toContain("authorization=");
+});

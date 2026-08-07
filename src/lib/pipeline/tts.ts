@@ -44,9 +44,12 @@ function decodePcm(base64: string): Int16Array {
 export async function* synthesize(text: string, deps: TtsDeps): AsyncIterable<TtsChunk> {
   const token = await deps.transport.ttsToken();
   const voice = deps.voiceId ?? DEFAULT_VOICE;
+  // `single_use_token`, not `authorization`: the socket closes with 1008 on the
+  // latter ("none of the authentication methods were found"), so live speech never
+  // worked. The offline fixtures skip this socket, which is why tests stayed green.
   const url =
     `wss://api.elevenlabs.io/v1/text-to-speech/${voice}/stream-input` +
-    `?model_id=${MODEL}&output_format=pcm_16000&authorization=${token}`;
+    `?model_id=${MODEL}&output_format=pcm_16000&single_use_token=${encodeURIComponent(token)}`;
 
   const make = deps.socketFactory ?? ((u: string) => new WebSocket(u) as unknown as WebSocketLike);
   const ws = make(url);

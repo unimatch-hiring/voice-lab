@@ -27,9 +27,12 @@ export async function transcribe(audio: Blob, deps: SttDeps): Promise<SttResult>
   form.set("timestamps_granularity", "word");
   form.set("diarize", "false");
 
-  const r = await fetchImpl(SCRIBE_URL, {
+  // The single-use token goes in the query string, not in a header. Scribe rejects
+  // `authorization: Bearer <sutkn_...>` and `xi-api-key` alike with a 401, so live
+  // transcription silently never worked — the offline fixtures do not touch this
+  // call, which is why the test suite stayed green.
+  const r = await fetchImpl(`${SCRIBE_URL}?token=${encodeURIComponent(token)}`, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}` },
     body: form,
   });
   if (!r.ok) throw new Error(`scribe failed: ${r.status}`);

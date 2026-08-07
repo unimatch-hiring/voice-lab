@@ -58,3 +58,18 @@ test("clamps confidence to 1 when the provider returns a non-negative logprob", 
 
   expect(out.words[0].confidence).toBe(1);
 });
+
+test("passes the single-use token in the query string, not a header", async () => {
+  // Scribe answers 401 to `authorization: Bearer <sutkn_...>` and to `xi-api-key`.
+  // Live transcription was broken this way while every fixture test stayed green,
+  // because the fixtures never reach this call.
+  const fetchImpl = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(scribeResponse), { status: 200 }),
+  );
+
+  await transcribe(new Blob(["x"]), { transport, fetchImpl });
+
+  const [url, init] = fetchImpl.mock.calls[0];
+  expect(String(url)).toContain("token=tok");
+  expect(init.headers ?? {}).not.toHaveProperty("authorization");
+});
