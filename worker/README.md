@@ -5,14 +5,13 @@
 
 ## Деплой
 
-Аккаунт Cloudflare `63a63f5ea5f7d57c414f317a22db92fe` (личный аккаунт Стаса —
-корпоративного нет; зон в нём тоже нет, поэтому адрес будет `*.workers.dev`).
+Зон в аккаунте нет, поэтому адрес будет `*.workers.dev`.
 
 ```sh
 cd worker
-wrangler secret put ELEVENLABS_API_KEY   # значение — из Vault secret/t-ai/shared/voice-poc
-wrangler secret put OPENROUTER_API_KEY   # значение — из Vault secret/t-ai/shared/techlead
-wrangler secret put VIBE_TOKEN           # придумать; выдаётся кандидату на день собеса
+wrangler secret put ELEVENLABS_API_KEY
+wrangler secret put OPENROUTER_API_KEY
+wrangler secret put VIBE_TOKEN           # выдаётся кандидату на день собеса
 wrangler deploy
 ```
 
