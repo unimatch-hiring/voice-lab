@@ -33,27 +33,32 @@ function timelineOf(chars: string[], durMs = 100): VisemeTimeline {
 /**
  * Какая форма рта сейчас проступает и насколько раскрыт рот (0..1).
  *
- * Слои складываются с постоянной суммой: до половины пути набирает полуфаза,
- * после — полный кадр гасит её ровно настолько, насколько проступает сам.
- * Поэтому раскрытие восстанавливаем как `half/2` на первой половине и
- * `0.5 + full/2` на второй, а не как сумму прозрачностей.
+ * Раскрытие разложено по четырём кадрам (rest -> q -> h -> полный) с постоянной
+ * суммой прозрачностей: видно ровно двух соседей по фазе. Поэтому амплитуду
+ * восстанавливаем как позицию между этими соседями на шкале фаз, а не как сумму
+ * прозрачностей — суммой она была бы всегда единицей.
  */
+const PHASE_LEVEL: Record<string, number> = { rest: 0, q: 1 / 3, h: 2 / 3, full: 1 };
+
 function readMouth(container: HTMLElement) {
   const lit = ([...container.querySelectorAll("img")] as HTMLImageElement[])
-    .map((el) => ({
-      name: el.getAttribute("src")!.split("/").pop()!.replace(".png", ""),
-      opacity: Number(el.style.opacity),
-    }))
+    .map((el) => {
+      const file = el.getAttribute("src")!.split("/").pop()!.replace(".png", "");
+      const suffix = file === "rest" ? "rest" : /[qh]$/.test(file) ? file.slice(-1) : "full";
+      return {
+        name: file,
+        shape: file.replace(/[qh]$/, ""),
+        level: PHASE_LEVEL[suffix],
+        opacity: Number(el.style.opacity),
+      };
+    })
     .filter((f) => f.name !== "rest" && f.opacity > 0.01);
-  const full = lit.find((f) => !f.name.endsWith("h"));
-  const half = lit.find((f) => f.name.endsWith("h"));
-  const openness = full
-    ? 0.5 + (full.opacity / 2)
-    : half
-      ? half.opacity / 2
-      : 0;
+
+  // Взвешенная позиция на шкале фаз: доли складываются в единицу, поэтому это
+  // ровно то раскрытие, которое видит глаз.
+  const openness = lit.reduce((sum, f) => sum + f.level * f.opacity, 0);
   const shape = lit.length
-    ? lit.reduce((a, b) => (b.opacity > a.opacity ? b : a)).name.replace(/h$/, "")
+    ? lit.reduce((a, b) => (b.opacity > a.opacity ? b : a)).shape
     : "rest";
   return { shape, openness };
 }

@@ -19,8 +19,22 @@ export const MOUTH_SPRITES: Record<Viseme, string> = {
   WQ: "face/WQ.png",
 };
 
-/** Полуоткрытая фаза каждой визимы (`*h`) — середина пути челюсти. */
-export const HALF_SPRITES: Record<Exclude<Viseme, "rest">, string> = {
+type Shape = Exclude<Viseme, "rest">;
+
+/** Четверть раскрытия (`*q`) — первая треть пути челюсти. */
+export const QUARTER_SPRITES: Record<Shape, string> = {
+  MBP: "face/MBPq.png",
+  AI: "face/AIq.png",
+  E: "face/Eq.png",
+  O: "face/Oq.png",
+  U: "face/Uq.png",
+  FV: "face/FVq.png",
+  L: "face/Lq.png",
+  WQ: "face/WQq.png",
+};
+
+/** Полуоткрытая фаза (`*h`) — середина пути челюсти. */
+export const HALF_SPRITES: Record<Shape, string> = {
   MBP: "face/MBPh.png",
   AI: "face/AIh.png",
   E: "face/Eh.png",
@@ -31,19 +45,29 @@ export const HALF_SPRITES: Record<Exclude<Viseme, "rest">, string> = {
   WQ: "face/WQh.png",
 };
 
-type FrameKey = Viseme | `${Exclude<Viseme, "rest">}h`;
+type FrameKey = Viseme | `${Shape}h` | `${Shape}q`;
+
+const SHAPES = Object.keys(HALF_SPRITES) as Shape[];
 
 const FRAME_KEYS: readonly FrameKey[] = [
   ...VISEMES,
-  ...(Object.keys(HALF_SPRITES) as Array<Exclude<Viseme, "rest">>).map(
-    (v) => `${v}h` as FrameKey,
-  ),
+  ...SHAPES.map((v) => `${v}h` as FrameKey),
+  ...SHAPES.map((v) => `${v}q` as FrameKey),
 ];
 
 function spriteOf(key: FrameKey): string {
-  return key.endsWith("h")
-    ? HALF_SPRITES[key.slice(0, -1) as Exclude<Viseme, "rest">]
-    : MOUTH_SPRITES[key as Viseme];
+  if (key.endsWith("q")) return QUARTER_SPRITES[key.slice(0, -1) as Shape];
+  if (key.endsWith("h")) return HALF_SPRITES[key.slice(0, -1) as Shape];
+  return MOUTH_SPRITES[key as Viseme];
+}
+
+/**
+ * Кадры одной визимы по возрастанию раскрытия. Сборщик спрайтов гарантирует
+ * этот порядок по факту (он переставляет фазы, если генератор промахнулся), так
+ * что интерполировать между соседями безопасно.
+ */
+function phasesOf(shape: Shape): readonly FrameKey[] {
+  return ["rest", `${shape}q` as FrameKey, `${shape}h` as FrameKey, shape as FrameKey];
 }
 
 /**
@@ -86,7 +110,11 @@ const FRAME_MS = 16.7;
  */
 const SHAPE_HOLD_MS = 150;
 
-/** Ниже этого раскрытия показываем закрытый рот. */
+/**
+ * Мёртвая зона у закрытого рта: ниже этого раскрытия рот считаем сомкнутым.
+ * Амплитуда не обрубается на пороге, а растягивается от него — иначе на входе
+ * в речь рот открывался рывком.
+ */
 const CLOSED_BELOW = 0.12;
 
 export function Mouth({
@@ -105,12 +133,11 @@ export function Mouth({
     // чаще SHAPE_HOLD_MS, иначе рот перебирает формы быстрее, чем видно.
     let shape: Exclude<Viseme, "rest"> = "AI";
     let shapeAt = -Infinity;
-    // Что реально видно, чтобы не трогать DOM на каждом кадре зря.
-    let litHalf: FrameKey | null = null;
-    let litFull: FrameKey | null = null;
+    // Какие кадры сейчас подсвечены — чтобы гасить их при смене формы, а не
+    // перебирать все 25 на каждом тике.
+    let lit: FrameKey[] = [];
 
-    const setOpacity = (key: FrameKey | null, value: number) => {
-      if (!key) return;
+    const setOpacity = (key: FrameKey, value: number) => {
       const el = frames.current.get(key);
       if (el) el.style.opacity = value.toFixed(3);
     };
@@ -134,34 +161,34 @@ export function Mouth({
       const k = 1 - Math.exp(-SMOOTH_PER_MS * FRAME_MS);
       openness += (target - openness) * k;
 
-      // Раскрытие рисуем двумя слоями: полуфаза набирает силу на первой
-      // половине пути, полный кадр — на второй. Кроссфейд идёт по амплитуде, а
-      // не по таймеру, поэтому рассинхрона со звуком не возникает.
-      const half = `${shape}h` as FrameKey;
-      const full = shape as FrameKey;
-      const closed = openness < CLOSED_BELOW;
-      // Кроссфейд по трём точкам rest -> half -> full, но так, чтобы слои НЕ
-      // складывались: на середине пути прежняя формула зажигала полуфазу на
-      // 100% и одновременно начинала проявлять полный кадр — суммарная
-      // плотность подскакивала, и это читалось как рывок ровно посередине
-      // раскрытия. Здесь half гаснет на второй половине настолько же,
-      // насколько проступает full.
-      const t = closed ? 0 : Math.min(1, openness);
-      const halfOpacity = t <= 0.5 ? t / 0.5 : 1 - (t - 0.5) / 0.5;
-      const fullOpacity = t <= 0.5 ? 0 : (t - 0.5) / 0.5;
+      // Амплитуду раскладываем по четырём кадрам (rest -> q -> h -> полный):
+      // находим сегмент, в котором находимся, и показываем ровно двух соседей с
+      // весами, дающими в СУММЕ единицу. Постоянная сумма принципиальна: пока
+      // слои складывались, на второй половине раскрытия горели два кадра по
+      // 100%, суммарная плотность доходила до 2.0 и это читалось как рывок
+      // посередине движения. Три сегмента вместо одного дают вчетверо меньший
+      // шаг между соседними позами.
+      const phases = phasesOf(shape);
+      // Порог тишины растягиваем, а не обрубаем. Пока он просто обнулял
+      // амплитуду, на его пересечении сумма непрозрачности прыгала с 0 сразу на
+      // 0.36 — рот «включался» рывком на каждом входе в речь.
+      const t = Math.min(
+        1,
+        Math.max(0, (openness - CLOSED_BELOW) / (1 - CLOSED_BELOW)),
+      );
+      const seg = Math.min(phases.length - 2, Math.floor(t * (phases.length - 1)));
+      const frac = t * (phases.length - 1) - seg;
+      const lower = phases[seg];
+      const upper = phases[seg + 1];
 
-      if (litHalf !== half) {
-        setOpacity(litHalf, 0);
-        litHalf = half;
+      for (const key of lit) {
+        if (key !== lower && key !== upper && key !== "rest") setOpacity(key, 0);
       }
-      if (litFull !== full) {
-        setOpacity(litFull, 0);
-        litFull = full;
-      }
-      setOpacity(half, halfOpacity);
-      setOpacity(full, fullOpacity);
-      // Закрытый кадр — подложка: он гаснет ровно настолько, насколько
-      // раскрылся рот, поэтому шва между «закрыто» и «приоткрыто» не видно.
+      lit = [lower, upper];
+      if (lower !== "rest") setOpacity(lower, 1 - frac);
+      setOpacity(upper, frac);
+      // Закрытый кадр — подложка: остальные слои проявляются поверх него,
+      // поэтому шва между «закрыто» и «приоткрыто» не видно.
       setOpacity("rest", 1);
     };
 

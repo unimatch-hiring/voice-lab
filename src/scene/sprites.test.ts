@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { inflateSync } from "node:zlib";
-import { MOUTH_SPRITES, HALF_SPRITES } from "./Mouth";
+import { MOUTH_SPRITES, HALF_SPRITES, QUARTER_SPRITES } from "./Mouth";
 
 /**
  * Тесты на сами спрайты, а не на числа, которые компонент выставляет в opacity.
@@ -137,7 +137,11 @@ const MOUTH_W = () => {
 };
 
 test("каждый кадр рта существует на диске", () => {
-  for (const rel of [...Object.values(MOUTH_SPRITES), ...Object.values(HALF_SPRITES)]) {
+  for (const rel of [
+    ...Object.values(MOUTH_SPRITES),
+    ...Object.values(HALF_SPRITES),
+    ...Object.values(QUARTER_SPRITES),
+  ]) {
     expect(() => load(rel), rel).not.toThrow();
   }
 });
@@ -212,5 +216,28 @@ test("промежуточный кадр не распахнут сильнее
     const full = openness(mouthLuma(load(MOUTH_SPRITES[key])));
     expect(half, `${key}h должен быть приоткрыт`).toBeGreaterThan(0.01);
     expect(half, `${key}h распахнут шире, чем ${key}`).toBeLessThan(full * 1.15);
+  }
+});
+
+test("фазы одной визимы раскрываются строго по возрастанию", () => {
+  // Генератор не всегда попадает в заказанную амплитуду: у смычных /м/, /ф/
+  // «четверть» выходит шире «половины». Сборщик спрайтов переставляет фазы по
+  // факту, и этот порядок обязан держаться — иначе рот на такой визиме сначала
+  // откроется шире, а потом захлопнется посреди звука.
+  const rest = mouthLuma(load(MOUTH_SPRITES.rest));
+  const openness = (luma: Float64Array) => {
+    let n = 0;
+    for (let i = 0; i < luma.length; i++) if (rest[i] - luma[i] > 25) n++;
+    return n / luma.length;
+  };
+
+  for (const key of Object.keys(HALF_SPRITES) as Array<keyof typeof HALF_SPRITES>) {
+    const q = openness(mouthLuma(load(QUARTER_SPRITES[key])));
+    const h = openness(mouthLuma(load(HALF_SPRITES[key])));
+    const full = openness(mouthLuma(load(MOUTH_SPRITES[key])));
+    expect(q, `${key}: четверть шире половины (${q.toFixed(4)} > ${h.toFixed(4)})`)
+      .toBeLessThanOrEqual(h);
+    expect(h, `${key}: половина шире полной формы (${h.toFixed(4)} > ${full.toFixed(4)})`)
+      .toBeLessThanOrEqual(full);
   }
 });

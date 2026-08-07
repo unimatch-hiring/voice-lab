@@ -60,13 +60,43 @@ def main() -> int:
 
     frames = {"rest": base.copy()}
     for name in VISEMES:
-        for suffix in ("", "h"):
+        # Три фазы раскрытия на визиму: q (четверть) -> h (половина) -> полная.
+        # С двумя точками шаг амплитуды между соседними кадрами слишком велик и
+        # кроссфейд читается как рывок.
+        for suffix in ("", "h", "q"):
             path = os.path.join(SRC, f"{name}{suffix}.png")
             if not os.path.exists(path):
                 print(f"пропуск (нет кадра): {name}{suffix}")
                 continue
             src = Image.open(path).convert("RGB").resize((WORK, WORK), Image.LANCZOS)
             frames[f"{name}{suffix}"] = Image.composite(src, base, mask)
+
+    # Фазы сортируем по ФАКТИЧЕСКОМУ раскрытию, а не по имени файла: генератор
+    # не всегда попадает в заказанную амплитуду (у смычных /ф/, /м/ «четверть» и
+    # «половина» выходят почти одинаковыми и иногда меняются местами). Если
+    # оставить порядок по имени, рот на такой визиме сначала откроется шире, а
+    # потом захлопнется — это видимый рывок.
+    def openness(img: Image.Image) -> float:
+        ref = frames["rest"].convert("L").crop(
+            (int(0.36 * WORK), int(0.46 * WORK), int(0.64 * WORK), int(0.62 * WORK))
+        )
+        cur = img.convert("L").crop(
+            (int(0.36 * WORK), int(0.46 * WORK), int(0.64 * WORK), int(0.62 * WORK))
+        )
+        dark = sum(
+            1 for a, b in zip(ref.getdata(), cur.getdata()) if a - b > 25
+        )
+        return dark / (ref.width * ref.height)
+
+    for name in VISEMES:
+        phases = [f"{name}q", f"{name}h", name]
+        if not all(p in frames for p in phases):
+            continue
+        by_open = sorted(phases, key=lambda p: openness(frames[p]))
+        if by_open != phases:
+            print(f"  {name}: фазы переставлены по факту -> {' < '.join(by_open)}")
+            reordered = {slot: frames[src] for slot, src in zip(phases, by_open)}
+            frames.update(reordered)
 
     order = list(frames)
     small = {n: frames[n].resize((FINAL, FINAL), Image.LANCZOS) for n in order}
