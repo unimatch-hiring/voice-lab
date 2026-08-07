@@ -33,6 +33,12 @@ export function Waterfall({ bus }: { bus: EventBus }) {
     let smooth = 0;
     let lastTokens = -1;
 
+    // Canvas cannot use CSS variables, so read the resolved tokens once per frame
+    // batch — otherwise the plot stays light-themed on a dark page.
+    const css = getComputedStyle(canvas);
+    const token = (name: string, fallback: string) =>
+      css.getPropertyValue(name).trim() || fallback;
+
     const draw = () => {
       raf = requestAnimationFrame(draw);
       const now = performance.now();
@@ -47,7 +53,7 @@ export function Waterfall({ bus }: { bus: EventBus }) {
         canvas.style.height = `${h}px`;
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#fbfcfd";
+      ctx.fillStyle = token("--rack", "#151b24");
       ctx.fillRect(0, 0, w, h);
 
       const plotX = LABEL_W;
@@ -60,9 +66,9 @@ export function Waterfall({ bus }: { bus: EventBus }) {
       const active = model.activeStage;
       STAGE_ORDER.forEach((stage, i) => {
         const y = i * (ROW_H + ROW_GAP) + 4;
-        ctx.fillStyle = "rgba(16,21,28,0.04)";
+        ctx.fillStyle = token("--rack-sunken", "#0f141b");
         ctx.fillRect(plotX, y, plotW, ROW_H);
-        ctx.fillStyle = stage === active ? COLOR[stage] : "rgba(16,21,28,0.45)";
+        ctx.fillStyle = stage === active ? COLOR[stage] : token("--rack-dim", "#8b95a5");
         ctx.fillText(stage, 8, y + ROW_H / 2);
       });
 
@@ -79,7 +85,7 @@ export function Waterfall({ bus }: { bus: EventBus }) {
       }
 
       // The "now" cursor — the right edge of the window.
-      ctx.strokeStyle = "rgba(16,21,28,0.25)";
+      ctx.strokeStyle = token("--rack-edge", "#263041");
       ctx.beginPath();
       ctx.moveTo(Math.round(xOf(now)) + 0.5, 0);
       ctx.lineTo(Math.round(xOf(now)) + 0.5, h);
@@ -100,10 +106,11 @@ export function Waterfall({ bus }: { bus: EventBus }) {
   }, []);
 
   return (
-    <div>
+    <div className="wf-plot">
       <div className="wf-meta">
+        <span>input</span>
         <span className="wf-level"><span ref={levelRef} className="wf-level-fill" /></span>
-        <span>tokens: <b ref={tokensRef}>0</b></span>
+        <span>tokens <b className="readout" ref={tokensRef}>0</b></span>
       </div>
       <canvas ref={canvasRef} className="wf-canvas" />
     </div>

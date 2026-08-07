@@ -1,6 +1,22 @@
+/**
+ * The page is dressed as a measuring instrument, because that is what it is: the
+ * point of the product is honest per-stage timings. Hence the dark panel, the
+ * monospaced labels and readouts, and the stage hues carrying the signal path.
+ *
+ * Stage colours run cyan → magenta in pipeline order, so position in the run is
+ * legible from hue alone, before any label is read.
+ */
 :root {
-  --shield: #fbfcfd;
+  color-scheme: light dark;
+
+  /* Neutrals lean slightly blue, toward the accent, rather than sitting at a dead
+     grey — the panel should read as chosen, not inherited. */
+  --panel: #ffffff;
+  --ground: #f2f4f7;
+  --edge: #d8dde5;
   --ink: #10151c;
+  --ink-dim: #5a6472;
+
   --running: #1a4fa0;
   --ok: #1f7a5c;
   --fail: #c2392b;
@@ -16,33 +32,229 @@
   --stage-llm: #7209b7;
   --stage-tts: #b5179e;
   --stage-playback: #f72585;
+
+  --rack: #151b24;
+  --rack-edge: #263041;
+  --rack-ink: #e6edf3;
+  --rack-dim: #8b95a5;
+  --rack-sunken: #0f141b;
+
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --radius: 10px;
+  --gap: 20px;
+}
+
+/* Dark first via the OS signal, then both explicit overrides so the in-page theme
+   toggle wins in either direction. Tokens only — components never restyle inside a
+   media query. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --panel: #151b24;
+    --ground: #0d1117;
+    --edge: #263041;
+    --ink: #e6edf3;
+    --ink-dim: #8b95a5;
+    --running: #58a6ff;
+    --ok: #3fb950;
+    --fail: #f85149;
+  }
+}
+
+:root[data-theme="dark"] {
+  --panel: #151b24;
+  --ground: #0d1117;
+  --edge: #263041;
+  --ink: #e6edf3;
+  --ink-dim: #8b95a5;
+  --running: #58a6ff;
+  --ok: #3fb950;
+  --fail: #f85149;
+}
+
+:root[data-theme="light"] {
+  --panel: #ffffff;
+  --ground: #f2f4f7;
+  --edge: #d8dde5;
+  --ink: #10151c;
+  --ink-dim: #5a6472;
+  --running: #1a4fa0;
+  --ok: #1f7a5c;
+  --fail: #c2392b;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  background: var(--shield);
+  background: var(--ground);
   color: var(--ink);
-  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+  font: 15px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-.wf-canvas { width: 100%; display: block; border-radius: 6px; }
+:where(button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: 2px;
+}
+
+/* ── shell ─────────────────────────────────────────────────────────────── */
+
+.shell {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.masthead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.masthead p {
+  margin: 0;
+  max-width: 58ch;
+  color: var(--ink-dim);
+  text-wrap: pretty;
+}
+
+/* ── instrument panel ──────────────────────────────────────────────────── */
+
+/* The panel is dark in both themes: it is the instrument itself, and the character
+   already lives on #0b0e13 — a light card around it would fight the artwork. The
+   page around it still follows the viewer's theme. */
+.panel {
+  background: var(--rack);
+  border: 1px solid var(--rack-edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  color: var(--rack-ink);
+  box-shadow: 0 1px 2px rgba(8, 11, 16, 0.28), 0 18px 40px -24px rgba(8, 11, 16, 0.5);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rack-edge);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.panel-head .spacer { flex: 1; }
+
+/* State reads as form, not just as a word: a filled dot for live, hollow for
+   fixtures. */
+.mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.mode::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+
+.mode[data-live="true"] {
+  color: var(--ok);
+}
+
+.mode[data-live="true"]::before {
+  background: currentColor;
+}
+
+.readout {
+  font-variant-numeric: tabular-nums;
+  color: var(--rack-ink);
+}
+
+.panel-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── transport ─────────────────────────────────────────────────────────── */
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.talk {
+  appearance: none;
+  border: 1px solid var(--running);
+  background: var(--running);
+  color: #fff;
+  font: 600 14px/1 var(--sans);
+  padding: 12px 22px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.talk:hover:not(:disabled) { filter: brightness(1.08); }
+.talk:active:not(:disabled) { transform: translateY(1px); }
+
+.talk:disabled {
+  cursor: default;
+  filter: saturate(0.4) opacity(0.75);
+}
+
+.hint {
+  color: var(--rack-dim);
+  font-size: 13px;
+}
+
+.error {
+  margin: 0;
+  color: var(--fail);
+  font-size: 13px;
+}
+
+/* ── level meter ───────────────────────────────────────────────────────── */
 
 .wf-meta {
   display: flex;
   align-items: center;
-  gap: 16px;
-  font-size: 12px;
-  margin-bottom: 10px;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
 }
 
 .wf-level {
   position: relative;
-  width: 180px;
-  height: 10px;
-  border-radius: 5px;
-  background: rgba(16, 21, 28, 0.08);
+  width: 160px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--rack-sunken);
   overflow: hidden;
 }
 
@@ -51,21 +263,65 @@ body {
   inset: 0;
   transform-origin: left center;
   transform: scaleX(0);
-  background: var(--running);
+  background: var(--stage-capture);
   will-change: transform;
 }
 
-/* Character window: a square bezel so the frame reads as an instrument rather than
-   an image dropped onto the page. */
+.wf-plot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wf-canvas {
+  width: 100%;
+  flex: 1;
+  display: block;
+  border-radius: 6px;
+}
+
+/* ── stage / character split ───────────────────────────────────────────── */
+
+.run {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(200px, 27vw, 260px);
+  gap: var(--gap);
+  /* Stretch, not start: the character column is taller than the plot, and with
+     `start` the difference showed up as dead space under the stage lanes. */
+  align-items: stretch;
+}
+
+@media (max-width: 720px) {
+  .run { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The character is the playback stage, not a decoration parked underneath it, so
+   it sits inside the run as its own labelled panel. */
 .mouth-frame {
   margin: 0;
-  /* On a narrow screen the window shrinks to the column width but never below
-     260px: on a photorealistic face a small frame hides the articulation. */
-  width: clamp(260px, 46vw, 420px);
-  padding: 12px;
-  border-radius: 18px;
-  background: #10151c;
-  box-shadow: 0 1px 2px rgba(16, 21, 28, 0.16), 0 8px 24px rgba(16, 21, 28, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mouth-frame figcaption {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.mouth-frame figcaption::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--stage-playback);
 }
 
 .mouth-stack {
@@ -74,6 +330,7 @@ body {
   border-radius: 8px;
   overflow: hidden;
   background: #0b0e13;
+  border: 1px solid var(--rack-edge);
 }
 
 .mouth-stack img {
@@ -83,4 +340,171 @@ body {
   height: 100%;
   object-fit: cover;
   user-select: none;
+}
+
+/* ── token setup: deliberately quiet, it is a one-time step ────────────── */
+
+.setup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.setup input {
+  appearance: none;
+  font: 13px/1 var(--mono);
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  padding: 9px 11px;
+  width: 250px;
+}
+
+.setup input::placeholder { color: var(--ink-dim); }
+
+.setup button {
+  appearance: none;
+  font: 13px/1 var(--sans);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.setup button:hover:not(:disabled) { border-color: var(--running); color: var(--running); }
+.setup button:disabled { cursor: default; opacity: 0.5; }
+
+.linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--running);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+
+/* ── per-turn breakdown ────────────────────────────────────────────────── */
+
+.breakdown-empty {
+  margin: 0;
+  padding: 14px 0 4px;
+  border-top: 1px solid var(--rack-edge);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rack-edge);
+}
+
+.breakdown-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+/* The end-to-end number is the headline of the run, so it gets size rather than
+   sitting at label weight like everything else in this row. */
+.breakdown-total {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.breakdown-total .readout {
+  font-size: 17px;
+  font-weight: 600;
+  margin-right: 3px;
+}
+
+.breakdown-head .spacer { flex: 1; }
+
+.breakdown-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.breakdown-rows li {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 62px 38px;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--rack-dim);
+}
+
+.breakdown-name {
+  letter-spacing: 0.04em;
+}
+
+/* The stage that dominated the turn is the one worth acting on, so it is called out
+   in form, not left to be found by comparing numbers. */
+.breakdown-rows li[data-slowest="true"] .breakdown-name,
+.breakdown-rows li[data-slowest="true"] .breakdown-ms {
+  color: var(--rack-ink);
+  font-weight: 600;
+}
+
+.breakdown-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--rack-sunken);
+  overflow: hidden;
+}
+
+.breakdown-bar {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 420ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.breakdown-ms {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.breakdown-ms::after {
+  content: "ms";
+  margin-left: 3px;
+  color: var(--rack-dim);
+  font-weight: 400;
+  font-size: 10px;
+}
+
+.breakdown-share { text-align: right; color: var(--rack-dim); }
+
+.breakdown-foot {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rack-dim);
 }

@@ -10,8 +10,10 @@ import { respond } from "./lib/pipeline/llm";
 import { synthesize } from "./lib/pipeline/tts";
 import { FIXTURES, offlineStages } from "./lib/fixtures";
 import { loadConfig } from "./lib/config";
+import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
 import { Waterfall } from "./scene/Waterfall";
+import { StageBreakdown } from "./scene/StageBreakdown";
 import { Mouth } from "./scene/Mouth";
 import "./scene/tokens.css";
 
@@ -40,6 +42,10 @@ export function App() {
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The waterfall scrolls a 6s window, so a finished turn vanishes from it within
+  // seconds. Keeping the metrics means the result of the run stays on screen —
+  // which, for a product about honest timings, is the whole point.
+  const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
 
   // Live input: the level goes to the scene every frame and the VAD marks speech
   // boundaries as the capture and vad stages. Without it two lanes stay empty.
@@ -107,7 +113,7 @@ export function App() {
         audio = await recorder.stop();
         bus.emit({ type: "stage-end", stage: "capture", at: performance.now(), ttfbMs: 0 });
       }
-      await orch.runTurn(audio);
+      setMetrics(await orch.runTurn(audio));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -118,44 +124,67 @@ export function App() {
   useEffect(() => () => playback.stop(), [playback]);
 
   return (
-    <main style={{ maxWidth: 860, margin: "0 auto", padding: "32px 20px" }}>
-      <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>voice-lab</h1>
-      <p style={{ color: "rgba(16,21,28,0.6)", marginTop: 0 }}>
-        Say a phrase and watch it flow through a voice-agent pipeline.
-        {config.offline && " Offline right now: replaying recorded fixtures."}
-      </p>
+    <main className="shell">
+      <header className="masthead">
+        <h1>voice-lab</h1>
+        <p>
+          Hold the button and say something. Every stage of the pipeline reports the
+          milliseconds it actually took, and the character articulates the reply from
+          the timestamps the speech synthesis returns.
+        </p>
+      </header>
 
-      <button
-        onMouseDown={start}
-        onMouseUp={stop}
-        onMouseLeave={stop}
-        disabled={busy}
-        style={{ padding: "10px 18px", fontSize: 15, borderRadius: 8, cursor: "pointer" }}
-      >
-        {busy ? "working…" : config.offline ? "run a fixture" : "hold and speak"}
-      </button>
+      <section className="panel">
+        <div className="panel-head">
+          <span className="mode" data-live={!config.offline}>
+            {config.offline ? "fixtures" : "live"}
+          </span>
+          <span className="spacer" />
+          <span>window 6s</span>
+        </div>
 
-      {error && (
-        <p style={{ color: "var(--fail)", fontSize: 13 }}>{error}</p>
-      )}
+        <div className="panel-body">
+          <div className="transport">
+            <button
+              className="talk"
+              onMouseDown={start}
+              onMouseUp={stop}
+              onMouseLeave={stop}
+              disabled={busy}
+            >
+              {busy ? "working…" : config.offline ? "Run a recorded turn" : "Hold to speak"}
+            </button>
+            <span className="hint">
+              {busy
+                ? "Stages report as they finish."
+                : config.offline
+                  ? "No microphone needed — this replays a recorded turn."
+                  : "Release to send. Nothing is stored."}
+            </span>
+          </div>
+
+          {error && <p className="error">{error}</p>}
+
+          <div className="run">
+            <Waterfall bus={bus} />
+            <Mouth timeline={orch.timeline} playback={playback} />
+          </div>
+
+          <StageBreakdown metrics={metrics} busy={busy} />
+        </div>
+      </section>
 
       {tokenReady && <TokenGate token={storedToken} onChange={setStoredToken} />}
-
-      <div style={{ marginTop: 24 }}>
-        <Waterfall bus={bus} />
-      </div>
-
-      <div style={{ marginTop: 20, display: "flex", justifyContent: "center" }}>
-        <Mouth timeline={orch.timeline} playback={playback} />
-      </div>
     </main>
   );
 }
 
 /**
- * Client token entry, right on the page. The published build ships without a token
- * (otherwise our paid quota would go to every visitor), so this is where the live
- * pipeline is unlocked — including on the deployed site, with no local build.
+ * Client token entry. The published build ships without a token (otherwise our paid
+ * quota would go to every visitor), so this is where live mode is unlocked —
+ * including on the deployed site, with no local build.
+ *
+ * Kept visually quiet on purpose: it is a one-time step, not the main control.
  */
 function TokenGate({
   token,
@@ -169,25 +198,17 @@ function TokenGate({
 
   if (token) {
     return (
-      <p style={{ fontSize: 13, color: "rgba(16,21,28,0.6)", marginTop: 12 }}>
-        Live mode is on.{" "}
+      <p className="setup">
+        <span>Live mode is on — the pipeline talks to real services.</span>
         <button
           type="button"
+          className="linkish"
           onClick={async () => {
             await saveToken("");
             onChange("");
           }}
-          style={{
-            border: 0,
-            background: "none",
-            padding: 0,
-            font: "inherit",
-            color: "var(--running)",
-            cursor: "pointer",
-            textDecoration: "underline",
-          }}
         >
-          turn off
+          Switch back to fixtures
         </button>
       </p>
     );
@@ -195,6 +216,7 @@ function TokenGate({
 
   return (
     <form
+      className="setup"
       onSubmit={async (e) => {
         e.preventDefault();
         const next = draft.trim();
@@ -205,31 +227,21 @@ function TokenGate({
         setSaving(false);
         setDraft("");
       }}
-      style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}
     >
+      <label htmlFor="token">Have a token? Paste it to run the real pipeline.</label>
       <input
+        id="token"
         type="password"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="token for live mode"
+        placeholder="token"
         // No autoComplete: this is not the user's own password, no reason to offer
         // it to password managers.
         autoComplete="off"
         spellCheck={false}
-        style={{
-          padding: "7px 10px",
-          fontSize: 13,
-          borderRadius: 6,
-          border: "1px solid rgba(16,21,28,0.2)",
-          width: 260,
-        }}
       />
-      <button
-        type="submit"
-        disabled={saving || !draft.trim()}
-        style={{ padding: "7px 14px", fontSize: 13, borderRadius: 6, cursor: "pointer" }}
-      >
-        enable
+      <button type="submit" disabled={saving || !draft.trim()}>
+        {saving ? "saving…" : "Enable"}
       </button>
     </form>
   );

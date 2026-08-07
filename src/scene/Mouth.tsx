@@ -198,8 +198,9 @@ export function Mouth({
   }, [timeline, playback]);
 
   return (
-    <figure className="mouth-frame" aria-label="Response articulation">
-      <div className="mouth-stack">
+    <figure className="mouth-frame">
+      <figcaption>playback</figcaption>
+      <div className="mouth-stack" aria-label="Response articulation">
         {FRAME_KEYS.map((k) => (
           <img
             key={k}
