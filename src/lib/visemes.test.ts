@@ -70,3 +70,42 @@ test("reset clears accumulated offset", () => {
   expect(t.at(50)).toBe("O");
   expect(t.totalMs).toBe(100);
 });
+
+test("the timeline advances by the audio's length, not the alignment's", () => {
+  // Alignment describes only the characters it covers, so anchoring to it left the
+  // mouth running ahead of the voice — and the gap grew with every chunk.
+  const t = new VisemeTimeline();
+
+  t.append(
+    {
+      audio: new Int16Array(16000),
+      chars: ["а"],
+      charStartTimesMs: [0],
+      charDurationsMs: [100], // alignment says 100 ms, the audio plays for 1000
+    },
+    1000,
+  );
+
+  expect(t.totalMs, "a second of audio moves the timeline a second").toBe(1000);
+});
+
+test("a chunk without alignment still advances the timeline", () => {
+  // Audio can arrive with no alignment. Advancing by zero put every later chunk back
+  // at the start of the reply, so the mouth animated the first chunk and then froze
+  // while the voice kept going.
+  const t = new VisemeTimeline();
+
+  t.append(
+    { audio: new Int16Array(16000), chars: [], charStartTimesMs: [], charDurationsMs: [] },
+    1000,
+  );
+  expect(t.totalMs, "one second of audio moves the timeline a second").toBe(1000);
+
+  t.append({
+    audio: new Int16Array(0),
+    chars: ["а"],
+    charStartTimesMs: [0],
+    charDurationsMs: [100],
+  });
+  expect(t.at(1050), "the next chunk lands after the silent one, not on top of it").toBe("AI");
+});

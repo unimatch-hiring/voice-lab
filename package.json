@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@elevenlabs/client": "^1.17.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

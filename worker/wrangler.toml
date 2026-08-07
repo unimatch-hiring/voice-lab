@@ -3,7 +3,9 @@ main = "index.js"
 compatibility_date = "2026-08-05"
 
 [vars]
-LLM_MODEL = "anthropic/claude-haiku-4.5"
+# The ElevenLabs Agent this page talks to. Not a secret: a session token is still
+# required, and that is minted server-side.
+AGENT_ID = "agent_6701kzf2723mf3dtp7ben1j5dczt"
 # Who may call the Worker from a browser: the deployed frontend on GitHub Pages
 # plus local development. Origins include the scheme and no trailing slash.
 # :5173 is the dev server, :4173 is `vite preview`, where the production build is

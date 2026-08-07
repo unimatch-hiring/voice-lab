@@ -45,7 +45,13 @@ export class VisemeTimeline {
     return this.offsetMs;
   }
 
-  append(chunk: TtsChunk): void {
+  /**
+   * @param audioMs how long this chunk's audio actually plays. This, not the
+   * alignment, is what advances the timeline: alignment covers only the characters it
+   * describes, so anchoring to it left the mouth ahead of the voice by the difference
+   * — and the error accumulated with every chunk.
+   */
+  append(chunk: TtsChunk, audioMs = 0): void {
     let chunkEnd = 0;
 
     for (let i = 0; i < chunk.chars.length; i++) {
@@ -60,7 +66,27 @@ export class VisemeTimeline {
       });
     }
 
-    this.offsetMs += chunkEnd;
+    // The audio's own length wins when we know it: the timeline has to track the
+    // sound. Falls back to the alignment only when the chunk's duration is unknown.
+    this.offsetMs += audioMs > 0 ? audioMs : chunkEnd;
+  }
+
+  /**
+   * Appends alignment whose timings are already absolute, as ElevenLabs Agents reports
+   * them. The chunk-based `append` cannot be used there: with Agents we never see the
+   * audio, so there is no chunk length to advance an offset by.
+   */
+  appendAbsolute(chars: string[], startMs: number[], durationMs: number[]): void {
+    for (let i = 0; i < chars.length; i++) {
+      const start = startMs[i] ?? 0;
+      const dur = durationMs[i] ?? 0;
+      this.frames.push({
+        viseme: charToViseme(chars[i]),
+        startMs: start,
+        endMs: start + dur,
+      });
+      this.offsetMs = Math.max(this.offsetMs, start + dur);
+    }
   }
 
   at(elapsedMs: number): Viseme {

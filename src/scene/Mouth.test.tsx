@@ -184,3 +184,50 @@ test("a shape holds long enough to be seen", () => {
     globalThis.requestAnimationFrame = originalRaf;
   }
 });
+
+test("no layer jumps its opacity in a single frame", () => {
+  // The amplitude was smooth long before the picture was: shapes were swapped
+  // outright and a layer leaving the set was zeroed in one frame. Those steps are
+  // what read as flipping through stills rather than a mouth moving.
+  const timeline = timelineOf([..."Привет, это проверка"], 70);
+  const playback = { elapsedMs: 0, isPlaying: true, enqueue: () => {}, stop: () => {} };
+
+  const frames: FrameRequestCallback[] = [];
+  const originalRaf = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+    frames.push(cb);
+    return frames.length;
+  }) as typeof requestAnimationFrame;
+
+  try {
+    const { container } = render(
+      <Mouth timeline={timeline} playback={playback as never} />,
+    );
+    const lit = () =>
+      new Map(
+        ([...container.querySelectorAll("img")] as HTMLImageElement[])
+          .map((el) => {
+            const name = el.getAttribute("src")!.split("/").pop()!.replace(".png", "");
+            return [name, Number(el.style.opacity)] as [string, number];
+          })
+          .filter(([name, o]) => name !== "rest" && o > 0.004),
+      );
+
+    let worst = 0;
+    let prev = new Map<string, number>();
+    for (let i = 0; i < 120; i++) {
+      playback.elapsedMs = Math.round(i * 16.7);
+      frames.splice(0).forEach((cb) => cb(playback.elapsedMs));
+      const now = lit();
+      for (const [key, value] of now) worst = Math.max(worst, Math.abs(value - (prev.get(key) ?? 0)));
+      // A layer vanishing from the set is a step down to zero.
+      for (const [key, value] of prev) if (!now.has(key)) worst = Math.max(worst, value);
+      prev = now;
+    }
+
+    // An instant swap steps a full 1.0; the pre-easing version peaked around 0.33.
+    expect(worst, "every layer eases rather than cuts").toBeLessThan(0.2);
+  } finally {
+    globalThis.requestAnimationFrame = originalRaf;
+  }
+});

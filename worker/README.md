@@ -10,7 +10,6 @@ There are no zones on the account, so the address will be `*.workers.dev`.
 ```sh
 cd worker
 wrangler secret put ELEVENLABS_API_KEY
-wrangler secret put OPENROUTER_API_KEY
 wrangler secret put VIBE_TOKEN           # shared client secret, issued per session
 wrangler deploy
 ```
@@ -36,7 +35,6 @@ the project path.
 
 ```
 ELEVENLABS_API_KEY=...
-OPENROUTER_API_KEY=...
 VIBE_TOKEN=dev
 ```
 

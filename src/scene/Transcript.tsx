@@ -48,6 +48,13 @@ export function Transcript({ bus }: { bus: EventBus }) {
         case "stt-result":
           if (e.result.text.trim()) addRow("you", e.result.text);
           break;
+        case "agent-reply":
+          // Whole-message providers: replace the streamed line if there is one, so the
+          // reply is not shown twice.
+          if (openReply.current) openReply.current.textContent = e.text;
+          else addRow("agent", e.text);
+          openReply.current = null;
+          break;
         case "llm-token": {
           if (!openReply.current) openReply.current = addRow("agent", "");
           openReply.current.textContent += e.token;

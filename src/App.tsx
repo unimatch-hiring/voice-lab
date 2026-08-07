@@ -1,14 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EventBus } from "./lib/events";
-import { Orchestrator } from "./lib/pipeline/orchestrator";
-import { PlaybackQueue } from "./lib/pipeline/playback";
-import { Recorder } from "./lib/pipeline/capture";
-import { EnergyVad } from "./lib/pipeline/vad";
+import { AgentSession } from "./lib/pipeline/agentSession";
+import { VisemeTimeline } from "./lib/visemes";
 import { createTransport } from "./lib/transport";
-import { transcribe } from "./lib/pipeline/stt";
-import { respond } from "./lib/pipeline/llm";
-import { synthesize } from "./lib/pipeline/tts";
-import { FIXTURES, offlineStages } from "./lib/fixtures";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
@@ -37,153 +31,148 @@ export function App() {
     };
   }, []);
   const bus = useMemo(() => new EventBus(), []);
-  const playback = useMemo(
-    () => new PlaybackQueue(new AudioContext() as never),
-    [],
-  );
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The waterfall scrolls a 6s window, so a finished turn vanishes from it within
   // seconds. Keeping the metrics means the result of the run stays on screen —
   // which, for a product about honest timings, is the whole point.
   const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [talking, setTalking] = useState(false);
+  /** Who ended the last conversation, so the transport row can say so. */
+  const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
+  // Detection knobs, adjustable between sessions from the settings panel.
 
-  // Live input: the level goes to the scene every frame and the VAD marks speech
-  // boundaries as the capture and vad stages. Without it two lanes stay empty.
-  const recorder = useMemo(() => {
-    const vad = new EnergyVad();
-    return new Recorder({
-      onFrame: ({ samples, rms, at }) => {
-        bus.emit({ type: "audio-level", rms, at });
-        const event = vad.push(samples);
-        if (event === "speech-start") {
-          bus.emit({ type: "stage-start", stage: "vad", at });
-        } else if (event === "speech-end") {
-          bus.emit({ type: "stage-end", stage: "vad", at, ttfbMs: 0 });
-        }
+  // Speech clock for the mouth. Agents plays the audio itself, so there is no playhead to
+  // read: the clock starts when the agent starts speaking and the alignment timings are
+  // measured from that moment.
+  const speechStart = useRef(0);
+  const agentPlayhead = useMemo(
+    () => ({
+      get elapsedMs() {
+        return speechStart.current === 0 ? 0 : performance.now() - speechStart.current;
       },
-    });
-  }, [bus]);
+      get isPlaying() {
+        return speechStart.current !== 0;
+      },
+      enqueue: () => {},
+      stop: () => {},
+    }),
+    [],
+  );
 
-  const orch = useMemo(() => {
-    if (config.offline) {
-      return new Orchestrator({ bus, playback, ...offlineStages(FIXTURES[0]) });
-    }
+  // The mouth's shape source. With Agents the audio is played by the SDK, so the timeline
+  // is fed from its alignment events instead of from chunks we scheduled ourselves.
+  const timeline = useMemo(() => new VisemeTimeline(), []);
+
+  const session = useMemo(() => {
     const transport = createTransport({
       workerUrl: config.workerUrl,
       vibeToken: config.vibeToken,
     });
-    return new Orchestrator({
+    return new AgentSession({
       bus,
-      playback,
-      transcribe: (audio) => transcribe(audio, { transport }),
-      respond: (text, opts) => respond(text, { transport, history: opts.history }),
-      synthesize: (text) => synthesize(text, { transport }),
+      transport,
+      onAlignment: (chars, startMs, durationMs) => {
+        timeline.appendAbsolute(chars, startMs, durationMs);
+      },
+      onTurn: setMetrics,
+      onEnded: (reason, message) => {
+        setTalking(false);
+        // The agent hanging up is a normal ending, not a failure worth an error style.
+        setError(
+          reason === "error"
+            ? (message ?? "The conversation dropped. Start it again to keep talking.")
+            : null,
+        );
+        setEndedBy(reason);
+      },
+      onSpeaking: (speaking) => {
+        // Restarting the clock per reply keeps the alignment, which is measured from the
+        // start of each reply, lined up with the audio.
+        speechStart.current = speaking ? performance.now() : 0;
+        if (speaking) timeline.reset();
+      },
     });
-  }, [bus, playback, config]);
+  }, [bus, config, timeline]);
 
-  const holding = useRef(false);
-
-  const start = async () => {
-    if (holding.current) return;
-    holding.current = true;
+  const toggleConversation = async () => {
     setError(null);
-    // Do not start the offline turn here: setBusy(true) before mouseup disables the
-    // button, the browser swallows the mouseup, and the press never releases. The
-    // turn starts from stop(), same as in live mode.
-    if (!config.offline) {
-      try {
-        bus.emit({ type: "stage-start", stage: "capture", at: performance.now() });
-        await recorder.start();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        holding.current = false;
-      }
+    if (session.isRunning) {
+      await session.stop();
+      setTalking(false);
+      setEndedBy("user");
+      return;
     }
-  };
-
-  const stop = async () => {
-    if (!holding.current) return;
-    holding.current = false;
-    setBusy(true);
     try {
-      let audio: Blob;
-      if (config.offline) {
-        audio = new Blob([]);
-      } else {
-        audio = await recorder.stop();
-        bus.emit({ type: "stage-end", stage: "capture", at: performance.now(), ttfbMs: 0 });
-      }
-      setMetrics(await orch.runTurn(audio));
+      setEndedBy(null);
+      await session.start();
+      setTalking(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+      setTalking(false);
     }
   };
 
-  useEffect(() => () => playback.stop(), [playback]);
+  useEffect(
+    () => () => {
+      void session.stop();
+    },
+    [session],
+  );
 
   return (
     <main className="shell">
       <header className="masthead">
         <h1>voice-lab</h1>
         <p>
-          Hold the button and say something. Every stage of the pipeline reports the
-          milliseconds it actually took, and the character articulates the reply from
-          the timestamps the speech synthesis returns.
+          Start talking and it answers back. Every stage of the pipeline reports the
+          milliseconds it actually took, and the character articulates the reply from the
+          real loudness of the voice you are hearing.
         </p>
       </header>
 
       <section className="panel">
         <div className="panel-head">
           <span className="mode" data-live={!config.offline}>
-            {config.offline ? "fixtures" : "live"}
+            {config.offline ? "no token" : "live"}
           </span>
           <span className="spacer" />
           <span>window 6s</span>
           <button
             type="button"
-            className="gear"
+            className="settings-toggle"
             aria-expanded={settingsOpen}
-            aria-label="Settings"
             onClick={() => setSettingsOpen((v) => !v)}
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M8 5.5A2.5 2.5 0 1 0 8 10.5a2.5 2.5 0 0 0 0-5Zm0 1.4a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z"
-              />
-              <path
-                fill="currentColor"
-                d="M6.9.9h2.2l.3 1.7c.4.1.8.3 1.2.5l1.4-1 1.6 1.6-1 1.4c.2.4.4.8.5 1.2l1.7.3v2.2l-1.7.3c-.1.4-.3.8-.5 1.2l1 1.4-1.6 1.6-1.4-1c-.4.2-.8.4-1.2.5l-.3 1.7H6.9l-.3-1.7c-.4-.1-.8-.3-1.2-.5l-1.4 1L2.4 12l1-1.4c-.2-.4-.4-.8-.5-1.2L1.2 9.1V6.9l1.7-.3c.1-.4.3-.8.5-1.2l-1-1.4L4 2.4l1.4 1c.4-.2.8-.4 1.2-.5L6.9.9Zm1.2 1.4-.2 1.3-.8.2c-.5.1-.9.3-1.3.6l-.7.4-1.1-.8-.2.2.8 1.1-.4.7c-.3.4-.5.8-.6 1.3l-.2.8-1.3.2v.2l1.3.2.2.8c.1.5.3.9.6 1.3l.4.7-.8 1.1.2.2 1.1-.8.7.4c.4.3.8.5 1.3.6l.8.2.2 1.3h.2l.2-1.3.8-.2c.5-.1.9-.3 1.3-.6l.7-.4 1.1.8.2-.2-.8-1.1.4-.7c.3-.4.5-.8.6-1.3l.2-.8 1.3-.2V7.9l-1.3-.2-.2-.8c-.1-.5-.3-.9-.6-1.3l-.4-.7.8-1.1-.2-.2-1.1.8-.7-.4c-.4-.3-.8-.5-1.3-.6l-.8-.2-.2-1.3h-.2Z"
-              />
-            </svg>
+            {settingsOpen ? "close" : "settings"}
           </button>
         </div>
 
         {settingsOpen && tokenReady && (
-          <TokenGate token={storedToken} onChange={setStoredToken} />
+          <TokenGate
+            token={storedToken}
+            onChange={setStoredToken}
+          />
         )}
 
         <div className="panel-body">
           <div className="transport">
             <button
               className="talk"
-              onMouseDown={start}
-              onMouseUp={stop}
-              onMouseLeave={stop}
-              disabled={busy}
+              data-talking={talking}
+              onClick={toggleConversation}
+              disabled={config.offline}
             >
-              {busy ? "working…" : config.offline ? "Run a recorded turn" : "Hold to speak"}
+              {talking ? "End conversation" : "Start conversation"}
             </button>
             <span className="hint">
-              {busy
-                ? "Stages report as they finish."
-                : config.offline
-                  ? "No microphone needed — this replays a recorded turn."
-                  : "Release to send. Nothing is stored."}
+              {config.offline
+                ? "Add an access token in settings to start talking."
+                : talking
+                  ? "Listening. Just speak; pauses end your turn."
+                  : endedBy === "agent"
+                    ? "The agent ended the conversation. Start again whenever you like."
+                    : "Your microphone stays open, so you talk and it answers."}
             </span>
           </div>
 
@@ -194,10 +183,14 @@ export function App() {
               <Waterfall bus={bus} />
               <Transcript bus={bus} />
             </div>
-            <Mouth timeline={orch.timeline} playback={playback} />
+            <Mouth
+              timeline={timeline}
+              playback={agentPlayhead}
+              outputLevel={() => session.outputLevel()}
+            />
           </div>
 
-          <StageBreakdown metrics={metrics} busy={busy} />
+          <StageBreakdown metrics={metrics} />
         </div>
       </section>
 
@@ -206,11 +199,9 @@ export function App() {
 }
 
 /**
- * Token settings, opened from the gear in the panel header.
- *
- * The published build ships without a token — baking one in would hand our paid
- * quota to every visitor — so this is where live mode is switched on, and it works
- * on the deployed site with no local build.
+ * Settings, folded away behind the header toggle: the token that unlocks live mode,
+ * plus the two audio knobs that decide when a turn ends. Both matter in practice —
+ * room noise differs, and a threshold tuned in a quiet room clips words in a loud one.
  */
 function TokenGate({
   token,
@@ -224,31 +215,25 @@ function TokenGate({
 
   return (
     <div className="settings">
-      <p className="settings-state">
-        <span className="mode" data-live={Boolean(token)}>
-          {token ? "Live mode" : "Fixture mode"}
-        </span>
-        <span className="settings-note">
-          {token
-            ? "Speech, the model and the voice are the real services."
-            : "Recorded turns replay locally. No microphone, no keys, no cost."}
-        </span>
-      </p>
-
       {token ? (
-        <button
-          type="button"
-          className="settings-secondary"
-          onClick={async () => {
-            await saveToken("");
-            onChange("");
-          }}
-        >
-          Forget token and use fixtures
-        </button>
+        <div className="settings-block">
+          <p className="settings-state">
+            Your microphone, the real speech recognition, model and voice.
+          </p>
+          <button
+            type="button"
+            className="settings-secondary"
+            onClick={async () => {
+              await saveToken("");
+              onChange("");
+            }}
+          >
+            Forget token
+          </button>
+        </div>
       ) : (
         <form
-          className="settings-form"
+          className="settings-block"
           onSubmit={async (e) => {
             e.preventDefault();
             const next = draft.trim();
@@ -267,7 +252,7 @@ function TokenGate({
               type="password"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="paste to switch to live mode"
+              placeholder="paste to start talking"
               // No autoComplete: this is not the user's own password, no reason to
               // offer it to password managers.
               autoComplete="off"
@@ -277,11 +262,11 @@ function TokenGate({
               {saving ? "Saving…" : "Save"}
             </button>
           </div>
-          <p className="settings-hint">
-            Stored encrypted in this browser and kept between reloads.
-          </p>
+          <p className="settings-hint">Stored encrypted in this browser.</p>
         </form>
       )}
+
+
     </div>
   );
 }

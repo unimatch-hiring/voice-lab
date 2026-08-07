@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import type { Viseme, VisemeTimeline } from "../lib/visemes";
-import type { PlaybackLike } from "../lib/pipeline/orchestrator";
+/** The mouth's clock: with Agents the SDK plays the audio, so this is not a queue. */
+export interface PlaybackLike {
+  readonly elapsedMs: number;
+  readonly isPlaying: boolean;
+}
 
 const VISEMES: readonly Viseme[] = [
   "rest", "MBP", "AI", "E", "O", "U", "FV", "L", "WQ",
@@ -61,20 +65,15 @@ function spriteOf(key: FrameKey): string {
   return MOUTH_SPRITES[key as Viseme];
 }
 
-/**
- * Frames of one viseme in increasing openness. The sprite builder enforces this
- * order empirically (it swaps phases when the generator misses), so
- * interpolating between neighbours is safe.
- */
+/** Frames of one viseme in increasing openness; the builder enforces the order. */
 function phasesOf(shape: Shape): readonly FrameKey[] {
   return ["rest", `${shape}q` as FrameKey, `${shape}h` as FrameKey, shape as FrameKey];
 }
 
-/**
- * Target openness per viseme. The sprites were drawn wide open, but phonemes
- * open the mouth to different degrees: /m/ closes the lips, /a/ flings them open.
- * Dark-cavity measurement across frames: MBP/WQ/FV/U ~17-19%, E/O/L ~23-25%, AI ~26%.
- */
+/** Frames per viseme: closed, quarter, half, full. */
+const PHASE_COUNT = 4;
+
+/** How far each viseme opens the mouth, from measured cavity area per frame. */
 const OPENNESS: Record<Viseme, number> = {
   rest: 0,
   MBP: 0.25,
@@ -87,18 +86,7 @@ const OPENNESS: Record<Viseme, number> = {
   AI: 1,
 };
 
-/**
- * Per-frame amplitude smoothing (exponential, ~200 ms to target). The jaw is
- * inertial mechanics: it travels toward a target instead of snapping between
- * shapes. That is exactly what the old "discrete frame + CSS fade" scheme could
- * not do: at 10-15 changes per second the fade never finished, frames flashed
- * for 16 ms each and the whole thing read as jitter. Here there is nothing to
- * jitter — the amplitude is continuous.
- *
- * Smoothing costs us full extremes and some lag behind the audio, but not much:
- * on the Russian fixture the range is 0.81 out of 0.90 with 33 ms of lag
- * (invisible to the eye), while the jerk drops 3.5x, to 0.014.
- */
+/** Exponential approach to the target, ~200 ms. Invariants: docs/mouth.md */
 const SMOOTH_PER_MS = 0.005;
 
 /** Animation frame step at 60 Hz — the clock the jaw's inertia runs on. */
@@ -111,6 +99,18 @@ const FRAME_MS = 16.7;
  */
 const SHAPE_HOLD_MS = 150;
 
+/** Cross-over time for a shape change; an instant swap reads as flipping stills. */
+const SHAPE_FADE_MS = 90;
+
+/** Per-frame easing of every layer's opacity; a one-frame drop to zero is visible. */
+const LAYER_EASE = 0.25;
+
+/** Speech rarely peaks, so a normal level is scaled onto the full range of poses. */
+const LEVEL_GAIN = 3.2;
+
+/** Below this the mouth is shut: the noise floor otherwise holds it ajar. */
+const LEVEL_FLOOR = 0.02;
+
 /**
  * Dead zone near the closed mouth: below this openness we treat it as shut.
  * The amplitude is rescaled from the threshold rather than clipped at it —
@@ -121,9 +121,19 @@ const CLOSED_BELOW = 0.12;
 export function Mouth({
   timeline,
   playback,
+  outputLevel,
 }: {
   timeline: VisemeTimeline;
   playback: PlaybackLike;
+  /**
+   * Real output loudness, 0..1, sampled per frame. When present it drives how far the
+   * mouth opens, and the timeline only picks which shape.
+   *
+   * Driving the amplitude from the alignment instead was the "sometimes it talks and the
+   * mouth does not move" bug: alignment does not arrive for every chunk and can drift
+   * from the audio, whereas loudness cannot — sound means an open mouth by definition.
+   */
+  outputLevel?: () => number;
 }) {
   const frames = useRef(new Map<FrameKey, HTMLImageElement>());
 
@@ -134,9 +144,14 @@ export function Mouth({
     // we switch no more often than SHAPE_HOLD_MS, or it cycles faster than visible.
     let shape: Exclude<Viseme, "rest"> = "AI";
     let shapeAt = -Infinity;
-    // Which frames are currently lit — so we can dim those on a shape change
-    // instead of walking all 25 every tick.
-    let lit: FrameKey[] = [];
+    // The shape being faded out, and how many animation frames into that crossfade we
+    // are. Counted in frames, not from the playhead: while audio is paused elapsedMs
+    // does not advance, and a crossfade measured against it would hang half-done.
+    let prevShape: Exclude<Viseme, "rest"> | null = null;
+    let fadeFrames = 0;
+    // What each layer is currently showing, so it can be eased toward its next value
+    // instead of jumping there.
+    const shown = new Map<FrameKey, number>();
 
     const setOpacity = (key: FrameKey, value: number) => {
       const el = frames.current.get(key);
@@ -145,57 +160,86 @@ export function Mouth({
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      // Two clocks, deliberately. The openness TARGET is read off the audio
-      // playhead — otherwise the mouth would drift out of sync with the sound.
-      // The jaw's INERTIA runs on animation frames: while audio is paused
-      // `elapsedMs` does not advance, so the mouth would freeze mid-travel.
+      // Two clocks on purpose: the target comes from the playhead so the mouth cannot
+      // drift from the sound, while the inertia counts animation frames — on a paused
+      // playhead it would otherwise freeze half-way to a shape.
       const now = playback.elapsedMs;
       const viseme = timeline.at(now);
+      const measured = outputLevel?.();
       if (viseme !== "rest" && viseme !== shape && now - shapeAt >= SHAPE_HOLD_MS) {
+        prevShape = shape;
         shape = viseme;
         shapeAt = now;
+        fadeFrames = 0;
       }
 
       // Exponential approach to the target: step size is proportional to the
       // remaining distance, so it starts fast and eases into the shape.
-      const target = OPENNESS[viseme];
+      // Silence must mean a shut mouth: no viseme may hold it open on its own.
+      let target: number;
+      if (measured === undefined) {
+        target = OPENNESS[viseme];
+      } else if (measured < LEVEL_FLOOR) {
+        target = 0;
+      } else {
+        const loudness = Math.min(1, (measured - LEVEL_FLOOR) * LEVEL_GAIN);
+        target = loudness * (OPENNESS[viseme] || OPENNESS.AI);
+      }
       const k = 1 - Math.exp(-SMOOTH_PER_MS * FRAME_MS);
       openness += (target - openness) * k;
 
-      // Spread the amplitude across four frames (rest -> q -> h -> full): find
-      // the segment we are in and show exactly two neighbours with weights that
-      // SUM to one. The constant sum matters: back when layers stacked, the
-      // second half of the opening lit two frames at 100%, total density reached
-      // 2.0 and it read as a jerk mid-motion. Three segments instead of one give
-      // a four times smaller step between adjacent poses.
-      const phases = phasesOf(shape);
-      // Rescale from the silence threshold instead of clipping at it. While it
-      // simply zeroed the amplitude, crossing it made total opacity jump from 0
-      // straight to 0.36 — the mouth "switched on" with a jerk on every entry
-      // into speech.
+      // Two neighbouring phases at a time, with weights summing to one.
+      // Weight of the incoming shape against the one it replaces.
+      const blend =
+        prevShape === null ? 1 : Math.min(1, (fadeFrames * FRAME_MS) / SHAPE_FADE_MS);
+      if (prevShape !== null) fadeFrames++;
+      if (blend >= 1) prevShape = null;
+
+
       const t = Math.min(
         1,
         Math.max(0, (openness - CLOSED_BELOW) / (1 - CLOSED_BELOW)),
       );
-      const seg = Math.min(phases.length - 2, Math.floor(t * (phases.length - 1)));
-      const frac = t * (phases.length - 1) - seg;
-      const lower = phases[seg];
-      const upper = phases[seg + 1];
+      const seg = Math.min(PHASE_COUNT - 2, Math.floor(t * (PHASE_COUNT - 1)));
+      const frac = t * (PHASE_COUNT - 1) - seg;
 
-      for (const key of lit) {
-        if (key !== lower && key !== upper && key !== "rest") setOpacity(key, 0);
+      // The outgoing shape gets the same split, so a change crosses over.
+      const active: Array<[FrameKey, number]> = [];
+      const spread = (target: Exclude<Viseme, "rest">, weight: number) => {
+        if (weight <= 0.001) return;
+        const ph = phasesOf(target);
+        const lo = ph[seg];
+        const up = ph[seg + 1];
+        if (lo !== "rest") active.push([lo, (1 - frac) * weight]);
+        active.push([up, frac * weight]);
+      };
+      spread(shape, blend);
+      if (prevShape !== null) spread(prevShape, 1 - blend);
+
+      // Every layer eases toward its target rather than being written to it.
+      const targets = new Map(active);
+      for (const key of FRAME_KEYS) {
+        if (key === "rest") continue;
+        const want = targets.get(key) ?? 0;
+        const have = shown.get(key) ?? 0;
+        if (want === 0 && have < 0.004) {
+          if (have !== 0) {
+            shown.set(key, 0);
+            setOpacity(key, 0);
+          }
+          continue;
+        }
+        const next = have + (want - have) * LAYER_EASE;
+        shown.set(key, next);
+        setOpacity(key, next);
       }
-      lit = [lower, upper];
-      if (lower !== "rest") setOpacity(lower, 1 - frac);
-      setOpacity(upper, frac);
-      // The closed frame is the backdrop: every other layer fades in on top of
-      // it, so there is no visible seam between "shut" and "slightly open".
+      // The closed frame is the backdrop the others fade in over.
       setOpacity("rest", 1);
     };
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [timeline, playback]);
+  }, [timeline, playback, outputLevel]);
 
   return (
     <figure className="mouth-frame">

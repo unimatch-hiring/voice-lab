@@ -11,17 +11,11 @@ import { STAGE_ORDER, type StageName, type TurnMetrics } from "../lib/types";
  * Bars are shares of the total, not absolute milliseconds: the interesting thing is
  * which stage dominates a turn, and that reads instantly from width.
  */
-export function StageBreakdown({
-  metrics,
-  busy,
-}: {
-  metrics: TurnMetrics | null;
-  busy: boolean;
-}) {
+export function StageBreakdown({ metrics }: { metrics: TurnMetrics | null }) {
   if (!metrics) {
     return (
       <p className="breakdown-empty">
-        {busy ? "Measuring…" : "Run a turn and the per-stage timings land here."}
+        Say something and the per-stage timings land here.
       </p>
     );
   }

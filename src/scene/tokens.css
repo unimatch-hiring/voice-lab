@@ -233,6 +233,14 @@ body {
 }
 
 .talk:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* An active session is a state, not just a label: the button turns into a stop
+   control so it is obvious the microphone is open. */
+.talk[data-talking="true"] {
+  background: transparent;
+  color: var(--fail);
+  border-color: var(--fail);
+}
 .talk:active:not(:disabled) { transform: translateY(1px); }
 
 .talk:disabled {
@@ -373,21 +381,25 @@ body {
 
 /* ── settings drawer ───────────────────────────────────────────────────── */
 
+/* Three columns on a wide panel so opening settings costs one short strip rather
+   than a screenful; stacks on narrow. */
 .settings {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px 20px;
   padding: 14px 16px;
   background: var(--rack-sunken);
   border-bottom: 1px solid var(--rack-edge);
 }
 
-.settings-state {
-  margin: 0;
+.settings-block {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-block > label {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -395,24 +407,40 @@ body {
   color: var(--rack-dim);
 }
 
-.settings-note {
-  font-family: var(--sans);
+/* Range inputs get the accent and a sunken track, so they read as instrument
+   controls rather than default browser widgets. */
+.settings input[type="range"] {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rack);
+  border: 1px solid var(--rack-edge);
+  cursor: pointer;
+}
+
+.settings input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--running);
+  border: 0;
+  cursor: pointer;
+}
+
+.settings input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--running);
+  border: 0;
+  cursor: pointer;
+}
+
+.settings-state {
+  margin: 0;
   font-size: 13px;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.settings-form label {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--rack-dim);
 }
 
@@ -506,7 +534,7 @@ body {
    not shove everything below it down the page. */
 .breakdown-empty {
   margin: 0;
-  min-height: 122px;
+  min-height: 96px;
   display: flex;
   align-items: flex-start;
   padding: 14px 0 4px;
@@ -522,7 +550,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 122px;
+  min-height: 96px;
   padding-top: 14px;
   border-top: 1px solid var(--rack-edge);
 }
@@ -701,15 +729,16 @@ body {
 
 /* ── settings ──────────────────────────────────────────────────────────── */
 
-.gear {
+/* A word, not a gear. The hand-authored cog outline collapsed into a smudge at
+   14px — the teeth are finer than the pixels available — and a label says what it
+   opens without depending on the icon being read at all. */
+.settings-toggle {
   appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  padding: 4px 9px;
+  border: 1px solid var(--rack-edge);
   border-radius: 6px;
   background: transparent;
   color: var(--rack-dim);
@@ -717,8 +746,8 @@ body {
   transition: color 120ms ease, border-color 120ms ease;
 }
 
-.gear:hover,
-.gear[aria-expanded="true"] {
+.settings-toggle:hover,
+.settings-toggle[aria-expanded="true"] {
   color: var(--rack-ink);
-  border-color: var(--rack-edge);
+  border-color: var(--rack-dim);
 }

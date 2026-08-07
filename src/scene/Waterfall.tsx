@@ -27,7 +27,11 @@ export function Waterfall({ bus }: { bus: EventBus }) {
 
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d", { alpha: false })!;
+    // A 2D context is not guaranteed: jsdom has none, and a browser can refuse one when
+    // too many canvases are live. Asserting it away threw inside the animation frame,
+    // where nothing catches it — the run failed with tests green.
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return;
     const model = modelRef.current;
     let raf = 0;
     let smooth = 0;
