@@ -10,12 +10,30 @@ import { respond } from "./lib/pipeline/llm";
 import { synthesize } from "./lib/pipeline/tts";
 import { FIXTURES, offlineStages } from "./lib/fixtures";
 import { loadConfig } from "./lib/config";
+import { loadToken, saveToken } from "./lib/tokenStore";
 import { Waterfall } from "./scene/Waterfall";
 import { Mouth } from "./scene/Mouth";
 import "./scene/tokens.css";
 
 export function App() {
-  const config = useMemo(loadConfig, []);
+  // Токен приходит из IndexedDB, то есть асинхронно, — поэтому конфиг живёт в
+  // состоянии. Первый рендер идёт в офлайне и переключается на живой режим, как
+  // только токен прочитан.
+  const [storedToken, setStoredToken] = useState("");
+  const [tokenReady, setTokenReady] = useState(false);
+  const config = useMemo(() => loadConfig(storedToken), [storedToken]);
+
+  useEffect(() => {
+    let alive = true;
+    loadToken().then((t) => {
+      if (!alive) return;
+      setStoredToken(t);
+      setTokenReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const bus = useMemo(() => new EventBus(), []);
   const playback = useMemo(
     () => new PlaybackQueue(new AudioContext() as never),
@@ -122,6 +140,8 @@ export function App() {
         <p style={{ color: "var(--fail)", fontSize: 13 }}>{error}</p>
       )}
 
+      {tokenReady && <TokenGate token={storedToken} onChange={setStoredToken} />}
+
       <div style={{ marginTop: 24 }}>
         <Waterfall bus={bus} />
       </div>
@@ -130,5 +150,88 @@ export function App() {
         <Mouth timeline={orch.timeline} playback={playback} />
       </div>
     </main>
+  );
+}
+
+/**
+ * Ввод клиентского токена прямо на странице. Публичная сборка приходит без
+ * токена (иначе платная квота досталась бы каждому посетителю), поэтому живой
+ * конвейер включается здесь — и на задеплоенном сайте, без локальной сборки.
+ */
+function TokenGate({
+  token,
+  onChange,
+}: {
+  token: string;
+  onChange: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  if (token) {
+    return (
+      <p style={{ fontSize: 13, color: "rgba(16,21,28,0.6)", marginTop: 12 }}>
+        Живой режим включён.{" "}
+        <button
+          type="button"
+          onClick={async () => {
+            await saveToken("");
+            onChange("");
+          }}
+          style={{
+            border: 0,
+            background: "none",
+            padding: 0,
+            font: "inherit",
+            color: "var(--running)",
+            cursor: "pointer",
+            textDecoration: "underline",
+          }}
+        >
+          отключить
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const next = draft.trim();
+        if (!next) return;
+        setSaving(true);
+        await saveToken(next);
+        onChange(next);
+        setSaving(false);
+        setDraft("");
+      }}
+      style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}
+    >
+      <input
+        type="password"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="токен для живого режима"
+        // Не autoComplete: это не пароль пользователя, менеджерам паролей его
+        // предлагать незачем.
+        autoComplete="off"
+        spellCheck={false}
+        style={{
+          padding: "7px 10px",
+          fontSize: 13,
+          borderRadius: 6,
+          border: "1px solid rgba(16,21,28,0.2)",
+          width: 260,
+        }}
+      />
+      <button
+        type="submit"
+        disabled={saving || !draft.trim()}
+        style={{ padding: "7px 14px", fontSize: 13, borderRadius: 6, cursor: "pointer" }}
+      >
+        включить
+      </button>
+    </form>
   );
 }
