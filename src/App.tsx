@@ -12,6 +12,26 @@ import { Transcript } from "./scene/Transcript";
 import { Mouth } from "./scene/Mouth";
 import "./scene/tokens.css";
 
+/**
+ * Turns a failed start into something the visitor can act on. The browser's own wording
+ * for a denied microphone ("Permission denied") does not say which permission, or where.
+ */
+export function startFailureMessage(e: unknown): string {
+  const name = e instanceof DOMException ? e.name : "";
+  const raw = e instanceof Error ? e.message : String(e);
+
+  if (name === "NotAllowedError" || /permission|denied/i.test(raw)) {
+    return "The microphone is blocked. Allow it in the address bar, then start again.";
+  }
+  if (name === "NotFoundError") {
+    return "No microphone found. Connect one and start again.";
+  }
+  if (/401|403|token/i.test(raw)) {
+    return "The access token was rejected. Open settings and paste it again.";
+  }
+  return raw;
+}
+
 export function App() {
   // The token comes from IndexedDB, i.e. asynchronously, so config lives in state.
   // The first render is offline and flips to live mode once the token is read.
@@ -108,7 +128,7 @@ export function App() {
       await session.start();
       setTalking(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(startFailureMessage(e));
       setTalking(false);
     }
   };
@@ -138,20 +158,27 @@ export function App() {
           </span>
           <span className="spacer" />
           <span>window 6s</span>
-          <button
-            type="button"
-            className="settings-toggle"
-            aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen((v) => !v)}
-          >
-            {settingsOpen ? "close" : "settings"}
-          </button>
+          {/* With no token the gate is open anyway, so the toggle would move nothing. */}
+          {!config.offline && (
+            <button
+              type="button"
+              className="settings-toggle"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((v) => !v)}
+            >
+              {settingsOpen ? "close" : "settings"}
+            </button>
+          )}
         </div>
 
-        {settingsOpen && tokenReady && (
+        {/* Without a token nothing runs, so the field is on screen, not behind the toggle. */}
+        {tokenReady && (config.offline || settingsOpen) && (
           <TokenGate
             token={storedToken}
-            onChange={setStoredToken}
+            onChange={(next) => {
+              setStoredToken(next);
+              setSettingsOpen(false);
+            }}
           />
         )}
 
@@ -167,12 +194,12 @@ export function App() {
             </button>
             <span className="hint">
               {config.offline
-                ? "Add an access token in settings to start talking."
+                ? "Paste the access token above to start talking."
                 : talking
                   ? "Listening. Just speak; pauses end your turn."
                   : endedBy === "agent"
                     ? "The agent ended the conversation. Start again whenever you like."
-                    : "Your microphone stays open, so you talk and it answers."}
+                    : "Step 2 — press it, allow the microphone, then just talk."}
             </span>
           </div>
 
@@ -214,11 +241,11 @@ function TokenGate({
   const [saving, setSaving] = useState(false);
 
   return (
-    <div className="settings">
+    <div className="settings" data-gate={!token}>
       {token ? (
         <div className="settings-block">
           <p className="settings-state">
-            Your microphone, the real speech recognition, model and voice.
+            Token saved. Press “Start conversation” below and allow the microphone.
           </p>
           <button
             type="button"
@@ -245,14 +272,14 @@ function TokenGate({
             setDraft("");
           }}
         >
-          <label htmlFor="token">Access token</label>
+          <label htmlFor="token">Step 1 — paste your access token</label>
           <div className="settings-row">
             <input
               id="token"
               type="password"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="paste to start talking"
+              placeholder="vibe_…"
               // No autoComplete: this is not the user's own password, no reason to
               // offer it to password managers.
               autoComplete="off"
@@ -262,7 +289,10 @@ function TokenGate({
               {saving ? "Saving…" : "Save"}
             </button>
           </div>
-          <p className="settings-hint">Stored encrypted in this browser.</p>
+          <p className="settings-hint">
+            The token came with your invite. Stored encrypted in this browser, so you
+            paste it once.
+          </p>
         </form>
       )}
 

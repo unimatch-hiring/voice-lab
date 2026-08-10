@@ -399,6 +399,17 @@ body {
   min-width: 0;
 }
 
+/* Before there is a token this is the page's primary action, not a drawer. */
+.settings[data-gate="true"] {
+  grid-template-columns: 1fr;
+  border-left: 2px solid var(--running);
+}
+
+.settings[data-gate="true"] > label,
+.settings[data-gate="true"] .settings-block > label {
+  color: var(--rack-ink);
+}
+
 .settings-block > label {
   font-family: var(--mono);
   font-size: 11px;
