@@ -77,12 +77,14 @@ async function issueInterviewKey(req, env, json) {
 
   const label = typeof body.label === "string" ? body.label.slice(0, 80) : "";
   const token = issuedKey();
-  const expiresAt = Date.now() + hours * 3600_000;
-  const record = { label, issuedAt: Date.now(), expiresAt };
+  const issuedAt = Date.now();
+  // KV refuses a TTL under a minute, so the stored lifetime — not the requested one — is
+  // what expiresAt has to describe. Otherwise the page calls a key expired while the
+  // Worker still honours it.
+  const ttlSeconds = Math.max(MIN_TTL_SECONDS, Math.round(hours * 3600));
+  const record = { label, issuedAt, expiresAt: issuedAt + ttlSeconds * 1000 };
 
-  await env.KEYS.put(`key:${token}`, JSON.stringify(record), {
-    expirationTtl: Math.max(MIN_TTL_SECONDS, Math.round(hours * 3600)),
-  });
+  await env.KEYS.put(`key:${token}`, JSON.stringify(record), { expirationTtl: ttlSeconds });
 
   return json({ token, ...record });
 }
@@ -92,11 +94,19 @@ async function listInterviewKeys(env, json) {
   const entries = await Promise.all(
     keys.map(async ({ name }) => {
       const raw = await env.KEYS.get(name);
-      const record = raw ? JSON.parse(raw) : {};
-      return { token: name.slice("key:".length), ...record };
+      const stored = raw ? JSON.parse(raw) : {};
+      // Defaults rather than a spread of whatever is stored: a record written by an older
+      // version, or a hand-made KV entry, otherwise reaches the page without expiresAt and
+      // renders as "NaNm left".
+      return {
+        token: name.slice("key:".length),
+        label: stored.label ?? "",
+        issuedAt: stored.issuedAt ?? 0,
+        expiresAt: stored.expiresAt ?? 0,
+      };
     }),
   );
-  entries.sort((a, b) => (b.issuedAt ?? 0) - (a.issuedAt ?? 0));
+  entries.sort((a, b) => b.issuedAt - a.issuedAt);
   return json({ keys: entries });
 }
 
@@ -125,8 +135,14 @@ export default {
       if (req.method === "POST" && path === "/admin/keys") return issueInterviewKey(req, env, json);
       if (req.method === "GET" && path === "/admin/keys") return listInterviewKeys(env, json);
       if (req.method === "DELETE") {
-        const token = path.slice("/admin/keys/".length);
+        // The client percent-encodes the token, so the raw pathname would delete a key
+        // spelled differently from the one that exists.
+        const token = decodeURIComponent(path.slice("/admin/keys/".length));
         if (!token) return json({ error: "token required" }, 400);
+        // Reported rather than assumed: KV deletes a missing key without complaint, and a
+        // revocation that quietly did nothing would leave a working credential behind.
+        const existed = (await env.KEYS.get(`key:${token}`)) !== null;
+        if (!existed) return json({ error: "no such key" }, 404);
         await env.KEYS.delete(`key:${token}`);
         return json({ revoked: token });
       }

@@ -113,6 +113,20 @@ describe("issuing interview keys", () => {
     expect(a.token).not.toBe(b.token);
   });
 
+  it("promises expiry no earlier than the TTL it actually stored", async () => {
+    // KV clamps sub-minute TTLs up to 60s. Reporting the requested lifetime instead made
+    // the page show "expired" while the Worker still minted tokens for that key.
+    const e = env();
+    const r = await worker.fetch(
+      req("/admin/keys", { headers: { "x-admin-token": "admin-secret" }, body: { hours: 0.001 } }),
+      e,
+    );
+    const issued = await r.json();
+    const storedTtlMs = e.KEYS.ttls.get(`key:${issued.token}`) * 1000;
+
+    expect(issued.expiresAt - issued.issuedAt).toBe(storedTtlMs);
+  });
+
   it("refuses a TTL beyond the cap", async () => {
     const r = await worker.fetch(
       req("/admin/keys", { headers: { "x-admin-token": "admin-secret" }, body: { hours: 999 } }),
@@ -152,6 +166,39 @@ describe("listing and revoking", () => {
       e,
     );
     expect((await r.json()).keys.map((k) => k.label)).toEqual(["new", "old"]);
+  });
+
+  it("always reports an expiry, so the page cannot render NaN", async () => {
+    // A record written by an older version, or by hand, has no expiresAt.
+    const e = env({ KEYS: fakeKv({ "key:vibe_partial": JSON.stringify({ label: "old" }) }) });
+    const r = await worker.fetch(
+      req("/admin/keys", { method: "GET", headers: { "x-admin-token": "admin-secret" } }),
+      e,
+    );
+
+    const [key] = (await r.json()).keys;
+    expect(Number.isFinite(key.expiresAt)).toBe(true);
+    expect(Number.isFinite(key.issuedAt)).toBe(true);
+  });
+
+  it("revokes the key the caller named, not its percent-encoded spelling", async () => {
+    const e = env({ KEYS: fakeKv({ "key:vibe_a/b": "{}" }) });
+    const r = await worker.fetch(
+      req("/admin/keys/vibe_a%2Fb", { method: "DELETE", headers: { "x-admin-token": "admin-secret" } }),
+      e,
+    );
+
+    expect(r.status).toBe(200);
+    expect(e.KEYS.store.has("key:vibe_a/b")).toBe(false);
+  });
+
+  it("says so when there was nothing to revoke, instead of reporting success", async () => {
+    const r = await worker.fetch(
+      req("/admin/keys/vibe_missing", { method: "DELETE", headers: { "x-admin-token": "admin-secret" } }),
+      env(),
+    );
+
+    expect(r.status).toBe(404);
   });
 
   it("revoking removes the key, and the holder immediately loses access", async () => {
