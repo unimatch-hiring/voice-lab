@@ -11,3 +11,10 @@ AGENT_ID = "agent_6701kzf2723mf3dtp7ben1j5dczt"
 # :5173 is the dev server, :4173 is `vite preview`, where the production build is
 # checked before deploying — without the second port that check is impossible.
 ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173"
+
+# Interview keys, one entry per issued key, expiring by KV's own TTL so nothing
+# has to sweep them. Without this binding the admin endpoints answer 404 and the
+# permanent VIBE_TOKEN keeps working on its own.
+[[kv_namespaces]]
+binding = "KEYS"
+id = "REPLACE_WITH_NAMESPACE_ID"

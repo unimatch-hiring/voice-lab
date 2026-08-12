@@ -1,0 +1,157 @@
+/* Admin route only. The instrument styling lives in tokens.css; this borrows its
+   variables so the two pages cannot drift apart. */
+
+.admin-shell {
+  max-width: 760px;
+}
+
+.admin-signin,
+.admin-issue {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.admin-signin label,
+.admin-issue label,
+.admin-ttl-label {
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.admin-signin input,
+.admin-issue input {
+  width: 100%;
+  padding: 10px 12px;
+  font: 14px/1.2 var(--sans);
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+}
+
+.admin-signin input:focus-visible,
+.admin-issue input:focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: 1px;
+}
+
+.admin-ttl {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-chip {
+  padding: 7px 14px;
+  font: 600 13px/1 var(--mono);
+  color: var(--ink-dim);
+  cursor: pointer;
+  background: var(--field);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+}
+
+.admin-chip[data-on="true"] {
+  color: var(--on-accent);
+  background: var(--running);
+  border-color: var(--running);
+}
+
+/* The freshly minted key: the one thing on the page that gets copied, so it is
+   given the width and the weight to be read out loud without squinting. */
+.admin-fresh {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  background: var(--field);
+  border: 1px solid var(--running);
+  border-radius: var(--radius);
+}
+
+.admin-fresh code {
+  flex: 1;
+  overflow-wrap: anywhere;
+  font: 13px/1.4 var(--mono);
+  color: var(--ink);
+}
+
+.admin-copy {
+  padding: 7px 14px;
+  font: 600 12px/1 var(--sans);
+  color: var(--on-accent);
+  cursor: pointer;
+  background: var(--running);
+  border: none;
+  border-radius: var(--radius);
+}
+
+.admin-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-list li {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.admin-list li:last-child {
+  border-bottom: none;
+}
+
+.admin-who {
+  font: 600 13px/1 var(--sans);
+  color: var(--ink);
+}
+
+.admin-token {
+  overflow: hidden;
+  max-width: 22ch;
+  font: 12px/1 var(--mono);
+  color: var(--ink-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-left {
+  font: 12px/1 var(--mono);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.admin-link {
+  padding: 0;
+  font: 600 12px/1 var(--sans);
+  color: var(--running);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.admin-error {
+  margin: 0;
+  font: 13px/1.4 var(--sans);
+  color: var(--fail);
+}
+
+@media (width <= 560px) {
+  .admin-list li {
+    grid-template-columns: 1fr auto;
+  }
+
+  .admin-token {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+}

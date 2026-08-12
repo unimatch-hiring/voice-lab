@@ -10,11 +10,32 @@ There are no zones on the account, so the address will be `*.workers.dev`.
 ```sh
 cd worker
 wrangler secret put ELEVENLABS_API_KEY
-wrangler secret put VIBE_TOKEN           # shared client secret, issued per session
+wrangler secret put VIBE_TOKEN           # permanent client secret, ours
+wrangler secret put ADMIN_TOKEN          # password for the key-issuing page
+wrangler kv namespace create KEYS        # put the id it prints into wrangler.toml
 wrangler deploy
 ```
 
 Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
+
+## Interview keys
+
+`VIBE_TOKEN` is ours and permanent. Candidates get their own keys, issued from the admin
+page (`?admin` on the frontend) and stored in the `KEYS` namespace under a TTL, so they
+expire on their own and revoking one does not disturb anybody else's.
+
+The Worker accepts either: `VIBE_TOKEN` first, then a lookup in KV. With no `KEYS`
+namespace bound the admin endpoints answer 404 and `VIBE_TOKEN` keeps working alone —
+a deployment that never wanted this feature is unaffected.
+
+| | |
+|---|---|
+| `POST /admin/keys` | issue one; body `{hours, label}`, capped at 24h |
+| `GET /admin/keys` | list the live ones |
+| `DELETE /admin/keys/:token` | revoke immediately |
+
+All three require `x-admin-token`. It must not be a key handed to a candidate — otherwise
+the candidate can issue more.
 
 After deploying, put the address you get
 (`https://voice-lab-token-minter.<subdomain>.workers.dev`) into the frontend's
