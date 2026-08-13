@@ -24,6 +24,7 @@ const DB_VERSION = 1;
 const STORE = "auth";
 const KEY_ID = "token-key";
 const BLOB_ID = "token-blob";
+const ADMIN_BLOB_ID = "admin-blob";
 
 interface StoredBlob {
   iv: number[];
@@ -67,11 +68,11 @@ async function getKey(db: IDBDatabase): Promise<CryptoKey> {
   return key;
 }
 
-export async function saveToken(token: string): Promise<void> {
+async function saveSecret(id: string, secret: string): Promise<void> {
   const db = await open();
   try {
-    if (!token) {
-      await tx(db, "readwrite", (s) => s.delete(BLOB_ID));
+    if (!secret) {
+      await tx(db, "readwrite", (s) => s.delete(id));
       return;
     }
     const key = await getKey(db);
@@ -79,16 +80,16 @@ export async function saveToken(token: string): Promise<void> {
     const data = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv },
       key,
-      new TextEncoder().encode(token),
+      new TextEncoder().encode(secret),
     );
     const blob: StoredBlob = { iv: [...iv], data: [...new Uint8Array(data)] };
-    await tx(db, "readwrite", (s) => s.put(blob, BLOB_ID));
+    await tx(db, "readwrite", (s) => s.put(blob, id));
   } finally {
     db.close();
   }
 }
 
-export async function loadToken(): Promise<string> {
+async function loadSecret(id: string): Promise<string> {
   let db: IDBDatabase;
   try {
     db = await open();
@@ -97,7 +98,7 @@ export async function loadToken(): Promise<string> {
     return "";
   }
   try {
-    const blob = await tx<StoredBlob | undefined>(db, "readonly", (s) => s.get(BLOB_ID));
+    const blob = await tx<StoredBlob | undefined>(db, "readonly", (s) => s.get(id));
     if (!blob) return "";
     const key = await getKey(db);
     const plain = await crypto.subtle.decrypt(
@@ -115,6 +116,30 @@ export async function loadToken(): Promise<string> {
   }
 }
 
+export async function saveToken(token: string): Promise<void> {
+  await saveSecret(BLOB_ID, token);
+}
+
+export async function loadToken(): Promise<string> {
+  return loadSecret(BLOB_ID);
+}
+
 export async function clearToken(): Promise<void> {
   await saveToken("");
+}
+
+/**
+ * The admin password, kept the same way and under the same key as the candidate token —
+ * a reload mid-interview must not lock us out of the tool that issues the keys.
+ */
+export async function saveAdminToken(secret: string): Promise<void> {
+  await saveSecret(ADMIN_BLOB_ID, secret);
+}
+
+export async function loadAdminToken(): Promise<string> {
+  return loadSecret(ADMIN_BLOB_ID);
+}
+
+export async function clearAdminToken(): Promise<void> {
+  await saveSecret(ADMIN_BLOB_ID, "");
 }
