@@ -13,8 +13,9 @@ Type-check is part of the build (`tsc -b`).
 ## Layout
 
 - `src/lib/pipeline/` — the conversation and the stage stream
-- `src/lib/` — transport, config, token storage, viseme mapping
+- `src/lib/` — transport, config, token storage, viseme mapping, fixture recorder
 - `src/scene/` — the scene; reads events only
+- `src/Admin.tsx` — `?admin`: issues the short-lived keys handed to candidates
 - `worker/` — Cloudflare Worker minting short-lived tokens
 - `tools/` — sprite builder
 - `docs/` — everything below

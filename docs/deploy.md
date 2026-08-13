@@ -23,9 +23,22 @@ Needs two repository secrets:
   zones, no billing.
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The provider keys (`ELEVENLABS_API_KEY`, `VIBE_TOKEN`) are bound to the Worker with
-`wrangler secret put` and are untouched by a deploy, so they never pass through CI.
-`AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
+The provider keys (`ELEVENLABS_API_KEY`, `VIBE_TOKEN`, `ADMIN_TOKEN`) are bound to the
+Worker with `wrangler secret put` and are untouched by a deploy, so they never pass through
+CI. `AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
+
+## Interview keys
+
+Candidates get their own short-lived keys instead of our permanent `VIBE_TOKEN`, issued
+from `?admin` and kept in the `KEYS` KV namespace. Setup and the endpoints:
+[`worker/README.md`](../worker/README.md).
+
+## Recording fixtures
+
+`?record` adds a control that saves the conversation to a JSON file when it ends — lines
+with timings plus the metrics of every turn. It is off unless asked for, so the published
+page is unchanged. The files it produces are what an analysis exercise runs on when there
+is no live agent to talk to.
 
 ## Origins
 

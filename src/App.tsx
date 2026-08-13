@@ -6,6 +6,7 @@ import { createTransport } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
+import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
@@ -84,6 +85,14 @@ export function App() {
   // is fed from its alignment events instead of from chunks we scheduled ourselves.
   const timeline = useMemo(() => new VisemeTimeline(), []);
 
+  // Fixture recording, ours and off by default: `?record` adds a control that saves the
+  // conversation to a JSON file. Fixtures are read away from the microphone.
+  const recording = useMemo(() => new URLSearchParams(location.search).has("record"), []);
+  const recorder = useMemo(() => new Recorder(bus), [bus]);
+  const [savedAs, setSavedAs] = useState<string | null>(null);
+  // The session is built before the save helper exists, and its `onEnded` needs to call it.
+  const saveRecordingRef = useRef<(() => void) | null>(null);
+
   const session = useMemo(() => {
     const transport = createTransport({
       workerUrl: config.workerUrl,
@@ -95,9 +104,15 @@ export function App() {
       onAlignment: (chars, startMs, durationMs) => {
         timeline.appendAbsolute(chars, startMs, durationMs);
       },
-      onTurn: setMetrics,
+      onTurn: (turn) => {
+        setMetrics(turn);
+        recorder.addTurn(turn);
+      },
       onEnded: (reason, message) => {
         setTalking(false);
+        // The agent can hang up on its own, in which case the transport button is never
+        // pressed — without this the recording of that conversation is simply lost.
+        if (reason !== "user") saveRecordingRef.current?.();
         // The agent hanging up is a normal ending, not a failure worth an error style.
         setError(
           reason === "error"
@@ -113,7 +128,25 @@ export function App() {
         if (speaking) timeline.reset();
       },
     });
-  }, [bus, config, timeline]);
+  }, [bus, config, timeline, recorder]);
+
+  /** Downloads the finished conversation as a fixture file. */
+  const saveRecording = () => {
+    const conversation = recorder.stop();
+    if (!conversation) return;
+
+    const name = fixtureFilename(conversation);
+    const url = URL.createObjectURL(
+      new Blob([toFixtureJson(conversation)], { type: "application/json" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSavedAs(name);
+  };
+  saveRecordingRef.current = recording ? saveRecording : null;
 
   const toggleConversation = async () => {
     setError(null);
@@ -121,10 +154,15 @@ export function App() {
       await session.stop();
       setTalking(false);
       setEndedBy("user");
+      if (recording) saveRecording();
       return;
     }
     try {
       setEndedBy(null);
+      if (recording) {
+        setSavedAs(null);
+        recorder.start();
+      }
       await session.start();
       setTalking(true);
     } catch (e) {
@@ -202,6 +240,14 @@ export function App() {
                     : "Step 2 — press it, allow the microphone, then just talk."}
             </span>
           </div>
+
+          {recording && (
+            <p className="hint">
+              {talking
+                ? "Recording. The conversation downloads as a fixture when it ends."
+                : (savedAs ?? "Fixture recording is on for this tab.")}
+            </p>
+          )}
 
           <p className="status-line">{error}</p>
 
