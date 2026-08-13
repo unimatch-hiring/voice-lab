@@ -11,10 +11,10 @@ There are no zones on the account, so the address will be `*.workers.dev`.
 cd worker
 wrangler secret put ELEVENLABS_API_KEY
 wrangler secret put VIBE_TOKEN           # permanent client secret, ours
-wrangler secret put ADMIN_TOKEN          # password for the key-issuing page
-wrangler kv namespace create KEYS        # put the id it prints into wrangler.toml
 wrangler deploy
 ```
+
+Interview keys need two more steps, and they are optional — see below.
 
 Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
 
@@ -23,6 +23,17 @@ Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
 `VIBE_TOKEN` is ours and permanent. Candidates get their own keys, issued from the admin
 page (`?admin` on the frontend) and stored in the `KEYS` namespace under a TTL, so they
 expire on their own and revoking one does not disturb anybody else's.
+
+Off until switched on, in this order — the binding is commented out in `wrangler.toml`
+because a placeholder id fails the deploy, and this Worker deploys automatically on a
+push to `main`:
+
+```sh
+wrangler kv namespace create KEYS   # prints the id
+wrangler secret put ADMIN_TOKEN     # password for the admin page
+# uncomment [[kv_namespaces]] in wrangler.toml, paste the id
+wrangler deploy
+```
 
 The Worker accepts either: `VIBE_TOKEN` first, then a lookup in KV. With no `KEYS`
 namespace bound the admin endpoints answer 404 and `VIBE_TOKEN` keeps working alone —
