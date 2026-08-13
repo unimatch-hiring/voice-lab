@@ -24,16 +24,14 @@ Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
 page (`?admin` on the frontend) and stored in the `KEYS` namespace under a TTL, so they
 expire on their own and revoking one does not disturb anybody else's.
 
-Off until switched on, in this order — the binding is commented out in `wrangler.toml`
-because a placeholder id fails the deploy, and this Worker deploys automatically on a
-push to `main`:
+The namespace is bound in `wrangler.toml`. One secret is still needed, once:
 
 ```sh
-wrangler kv namespace create KEYS   # prints the id
 wrangler secret put ADMIN_TOKEN     # password for the admin page
-# uncomment [[kv_namespaces]] in wrangler.toml, paste the id
-wrangler deploy
 ```
+
+Until it is set, the admin endpoints answer 401 and no key can be issued — minting
+session tokens with `VIBE_TOKEN` is unaffected either way.
 
 The Worker accepts either: `VIBE_TOKEN` first, then a lookup in KV. With no `KEYS`
 namespace bound the admin endpoints answer 404 and `VIBE_TOKEN` keeps working alone —
