@@ -38,6 +38,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # Wrangler's own failure for a missing token is a wall of text at the end of a log
+      # nobody opens. Say it here instead, with the fix.
+      - name: Check the deploy credentials exist
+        if: steps.changed.outputs.run == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            {
+              echo "### Worker not deployed"
+              echo
+              echo 'The repository has no `CLOUDFLARE_API_TOKEN`, so this change is merged but not live.'
+              echo
+              echo 'Create a token with **Workers Scripts: Edit**, then:'
+              echo '```sh'
+              echo 'gh secret set CLOUDFLARE_API_TOKEN --repo unimatch-hiring/voice-lab'
+              echo 'gh run rerun --repo unimatch-hiring/voice-lab --workflow "Deploy Worker"'
+              echo '```'
+              echo
+              echo 'Meanwhile it can be shipped by hand: `cd worker && npx wrangler@4 deploy`.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::CLOUDFLARE_API_TOKEN is not set — the Worker was not deployed. See the run summary."
+            exit 1
+          fi
       - name: Deploy
         if: steps.changed.outputs.run == 'true'
         working-directory: worker
