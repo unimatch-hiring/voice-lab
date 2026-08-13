@@ -12,16 +12,9 @@ AGENT_ID = "agent_6701kzf2723mf3dtp7ben1j5dczt"
 # checked before deploying — without the second port that check is impossible.
 ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173"
 
-# Interview keys live in KV, one entry per issued key, expiring by its own TTL so
-# nothing has to sweep them. The binding is deliberately absent until the namespace
-# exists: a placeholder id fails the deploy, and deploys here are automatic. Without
-# it the admin endpoints answer 404 and the permanent VIBE_TOKEN works as before.
-#
-#   wrangler kv namespace create KEYS
-#   wrangler secret put ADMIN_TOKEN
-#
-# then uncomment, paste the id it prints, and deploy:
-#
-# [[kv_namespaces]]
-# binding = "KEYS"
-# id = "..."
+# Interview keys, one entry per issued key, expiring by KV's own TTL so nothing has
+# to sweep them. Without this binding the admin endpoints answer 404 and the
+# permanent VIBE_TOKEN keeps working on its own.
+[[kv_namespaces]]
+binding = "KEYS"
+id = "5fc3e04365264ee897f5569ea3aafbbe"
