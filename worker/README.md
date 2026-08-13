@@ -14,9 +14,17 @@ wrangler secret put VIBE_TOKEN           # permanent client secret, ours
 wrangler deploy
 ```
 
-Interview keys need two more steps, and they are optional — see below.
-
 Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
+
+⚠️ **The automatic deploy is currently broken**: the repository has
+`CLOUDFLARE_ACCOUNT_ID` but no `CLOUDFLARE_API_TOKEN`, so
+[`worker.yml`](../.github/workflows/worker.yml) fails on authentication before it reads
+any config. It last succeeded on 10.08.2026, so the token was there and is now gone.
+
+Until a token with `Workers Scripts: Edit` is put back
+(`gh secret set CLOUDFLARE_API_TOKEN`), a Worker change has to be deployed by hand with
+`wrangler deploy`. Nothing is silently stale — the failed run is visible in Actions — but
+merging a `worker/` change does not ship it.
 
 ## Interview keys
 
@@ -24,14 +32,13 @@ Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
 page (`?admin` on the frontend) and stored in the `KEYS` namespace under a TTL, so they
 expire on their own and revoking one does not disturb anybody else's.
 
-The namespace is bound in `wrangler.toml`. One secret is still needed, once:
+Live since 13.08.2026: the namespace is bound in `wrangler.toml` and `ADMIN_TOKEN` is set.
+The password is in Vault at `secret/t-ai/shared/voice-poc`, field `VOICE_LAB_ADMIN_TOKEN`,
+next to this project's other secrets. To rotate it, write the new value to Vault first,
+then `wrangler secret put ADMIN_TOKEN` — the other order loses the password on a slip.
 
-```sh
-wrangler secret put ADMIN_TOKEN     # password for the admin page
-```
-
-Until it is set, the admin endpoints answer 401 and no key can be issued — minting
-session tokens with `VIBE_TOKEN` is unaffected either way.
+Until `ADMIN_TOKEN` is set the admin endpoints answer 401 and no key can be issued;
+minting session tokens with `VIBE_TOKEN` is unaffected either way.
 
 The Worker accepts either: `VIBE_TOKEN` first, then a lookup in KV. With no `KEYS`
 namespace bound the admin endpoints answer 404 and `VIBE_TOKEN` keeps working alone —
