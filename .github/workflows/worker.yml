@@ -30,7 +30,11 @@ jobs:
       - name: Skip when the Worker did not change
         id: changed
         run: |
-          if git diff --name-only HEAD~1 HEAD | grep -q '^worker/'; then
+          # A hand-started run means "deploy now" — asking whether the last commit
+          # happened to touch worker/ made the button do nothing at all.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD~1 HEAD | grep -q '^worker/'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
