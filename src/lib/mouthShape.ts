@@ -31,7 +31,7 @@ const SPECTRUM_TO_HZ = 8000;
  * page reload. Expect to move `sibilant` first if another voice reads every /s/ as
  * a wide-open mouth.
  */
-export const SHAPE_THRESHOLDS = {
+const SHAPE_THRESHOLDS = {
   /**
    * Share of ALL energy above 4 kHz, the fundamental included. Measured against
    * the articulatory bands alone, a voice with nothing above its fundamental —
@@ -72,7 +72,7 @@ function bandPower(spectrum: Uint8Array, fromHz: number, toHz: number): number {
   return sum / (hi - lo);
 }
 
-export interface MouthFeatures {
+interface MouthFeatures {
   /** The fundamental. On a voice around 200 Hz it carries most of the energy. */
   voice: number;
   /** Low first formant — the jaw nearly shut, as in /i/ and /u/. */
@@ -85,7 +85,7 @@ export interface MouthFeatures {
   hiss: number;
 }
 
-export function features(spectrum: Uint8Array): MouthFeatures {
+function features(spectrum: Uint8Array): MouthFeatures {
   return {
     voice: bandPower(spectrum, 100, 250),
     f1lo: bandPower(spectrum, 250, 500),

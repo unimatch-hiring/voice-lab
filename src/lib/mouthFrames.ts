@@ -88,8 +88,6 @@ export const LADDER: Record<Shape, readonly FrameKey[]> = {
   AI: ["rest", "AIq", "AIh", "AI"],
 };
 
-export const SHAPES = Object.keys(LADDER) as Shape[];
-
 /** Frames the renderer can show. One of them is opaque at any moment. */
 export const FRAME_KEYS: readonly FrameKey[] = [
   ...new Set(Object.values(LADDER).flat()),
