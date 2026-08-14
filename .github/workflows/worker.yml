@@ -21,12 +21,24 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # This is the one job in the repository that runs with a credential, so it is the
+      # one worth watching. The runner reports every outbound connection it makes; a
+      # step that has started talking to somewhere new is how an attempt to carry the
+      # token off the machine shows up. Audit until the reports have named the real
+      # endpoints across a few deploys, then switch to `block` with them listed —
+      # blocking against a guessed list breaks the deploy and teaches nobody anything.
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # workflow_run defaults to the branch tip, which may already be a newer commit
           # than the one CI passed on. Deploy exactly what was tested.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 2
+          persist-credentials: false
+
       - name: Skip when the Worker did not change
         id: changed
         run: |
@@ -39,9 +51,11 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-node@v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+
       # Wrangler's own failure for a missing token is a wall of text at the end of a log
       # nobody opens. Say it here instead, with the fix.
       - name: Check the deploy credentials exist
@@ -61,11 +75,12 @@ jobs:
               echo 'gh run rerun --repo unimatch-hiring/voice-lab --workflow "Deploy Worker"'
               echo '```'
               echo
-              echo 'Meanwhile it can be shipped by hand: `cd worker && npx wrangler@4 deploy`.'
+              echo 'Meanwhile it can be shipped by hand: `cd worker && npx wrangler deploy`.'
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::CLOUDFLARE_API_TOKEN is not set — the Worker was not deployed. See the run summary."
             exit 1
           fi
+
       - name: Deploy
         if: steps.changed.outputs.run == 'true'
         working-directory: worker
@@ -75,4 +90,6 @@ jobs:
           # and are not touched by a deploy, so they never pass through CI.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy
+        # Exact version, not `wrangler@4`: a floating major means whatever npm published
+        # this morning gets to run next to the token.
+        run: npx --yes wrangler@4.123.0 deploy

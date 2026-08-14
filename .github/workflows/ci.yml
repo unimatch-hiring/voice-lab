@@ -5,15 +5,58 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege by default. Nothing here writes anything back.
+permissions:
+  contents: read
+
 jobs:
+  # A pull request cannot reach our secrets — GitHub withholds them from forks — but a
+  # merged one runs on main, where the deploy workflows do have them. So the review
+  # that matters is of the files that decide what runs there. This fails loudly rather
+  # than leaving that to whoever is skimming the diff.
+  review-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Flag changes that decide what CI executes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          guarded=$(git diff --name-only "$BASE" "$HEAD" -- \
+            .github/ package.json package-lock.json worker/wrangler.toml)
+          [ -z "$guarded" ] && exit 0
+
+          {
+            echo "### This pull request changes how CI runs"
+            echo
+            echo 'Merging it means these files execute on `main`, where the deploy jobs'
+            echo 'hold the Cloudflare token. Read them line by line before merging:'
+            echo
+            echo '```'
+            echo "$guarded"
+            echo '```'
+            echo
+            echo 'Nothing is wrong with changing them — this check exists so the change'
+            echo 'is a decision rather than something that scrolled past.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::CI configuration or dependencies changed — see the run summary."
+          exit 1
+
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: a dependency's install hook is arbitrary code running before
+      # any of ours, and npm runs it by default. Nothing here needs one — esbuild ships
+      # its binary as an optional dependency — so the whole class is simply switched off.
+      - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
