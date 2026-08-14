@@ -1,0 +1,45 @@
+name: Analysis
+
+# Reads what a pull request actually contains, rather than refusing to look at it
+# because it touched a sensitive path. The exposure being covered: a merged PR runs
+# on main, where the Worker deploy holds the Cloudflare token.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Workflows are the shortest path to the token, and their failure modes are their
+  # own — an expression interpolated into a shell line, a trigger that hands secrets
+  # to fork code, an action pinned to a tag someone else can move. zizmor knows them.
+  workflows:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@e673c3917a1aef3c65c972347ed84ccd013ecda4 # v0.2.0
+
+  # A dependency arriving in a PR is code that will run in CI and in the browser.
+  # This one reads the diff of the lockfile: known vulnerabilities, licences, and
+  # anything on the deny list.
+  dependencies:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          # The project ships React and the ElevenLabs client and nothing else, so a
+          # new runtime dependency is a decision, not a detail. Dev dependencies are
+          # left to the severity gate above.
+          comment-summary-in-pr: on-failure
