@@ -42,10 +42,13 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
+      # No `cache: npm` on purpose. The cache is writable from an ordinary pull
+      # request and restored here, where the build output goes straight to the live
+      # site — a cheap way to have a PR ship code it never got reviewed for. CI keeps
+      # its cache; that job publishes nothing.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: npm
 
       # Same reasoning as CI: no dependency here needs an install hook, so none runs.
       - run: npm ci --ignore-scripts
