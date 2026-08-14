@@ -27,19 +27,16 @@ async function harness() {
   bus.on((e) => events.push(e));
 
   const turns: TurnMetrics[] = [];
-  const alignments: Array<{ chars: string[]; startMs: number[] }> = [];
 
   const session = new AgentSession({
     bus,
     transport: { agentToken: async () => ({ token: "t", agentId: "a" }) } as never,
-    onAlignment: (chars, startMs) => alignments.push({ chars, startMs }),
     onTurn: (m) => turns.push(m),
-    onSpeaking: () => {},
     onEnded: () => {},
   });
 
   await session.start();
-  return { session, events, turns, alignments };
+  return { session, events, turns };
 }
 
 const lanes = (events: PipelineEvent[], type: "stage-start" | "stage-end") =>
@@ -65,26 +62,6 @@ test("the model's stage closes when audio starts coming back", async () => {
 
   expect(lanes(events, "stage-end")).toContain("llm");
   expect(lanes(events, "stage-start"), "synthesis takes over").toContain("tts");
-});
-
-test("alignment offsets advance by the latest end, not the last element", async () => {
-  // The last character need not end latest. Taking the last element instead of the maximum
-  // put every later chunk early, and the error accumulated across a reply.
-  const { alignments } = await harness();
-
-  handlers.onAudioAlignment?.({
-    chars: ["а", "б", "в"],
-    char_start_times_ms: [0, 50, 60],
-    char_durations_ms: [50, 200, 20],
-  } as never);
-  handlers.onAudioAlignment?.({
-    chars: ["г"],
-    char_start_times_ms: [0],
-    char_durations_ms: [10],
-  } as never);
-
-  // First chunk's latest end is 50 + 200 = 250.
-  expect(alignments[1].startMs[0]).toBe(250);
 });
 
 test("a turn is reported when listening resumes", async () => {

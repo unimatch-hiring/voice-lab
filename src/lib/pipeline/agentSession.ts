@@ -1,17 +1,14 @@
 import { Conversation } from "@elevenlabs/client";
 import type { EventBus } from "../events";
+import { Desmoother } from "../mouthLevel";
 import type { Transport } from "../transport";
 import type { StageName, TurnMetrics } from "../types";
 
 export interface AgentSessionDeps {
   bus: EventBus;
   transport: Transport;
-  /** Character timings for the mouth, in absolute milliseconds from the reply's start. */
-  onAlignment: (chars: string[], startMs: number[], durationMs: number[]) => void;
   /** Called when a turn completes, with what each stage cost. */
   onTurn: (metrics: TurnMetrics) => void;
-  /** The agent started or stopped speaking — the mouth's clock runs off this. */
-  onSpeaking: (speaking: boolean) => void;
   /**
    * The conversation ended. `reason` says who ended it: the user pressed stop, the agent
    * decided it was done, or the connection failed.
@@ -26,13 +23,15 @@ export interface AgentSessionDeps {
 /** Detector score above which the vad lane counts as open. */
 const VAD_SPEECH = 0.5;
 
-// The SDK resamples 100-8000 Hz linearly across 1024 bins, so bin i is
-// 100 + (i / 1024) * 7900 Hz — independent of sample rate and FFT size.
-const JAW_BIN_FROM = 13; // ~200 Hz
-const JAW_BIN_TO = 104; // ~900 Hz
-const SIBILANT_BIN_FROM = 376; // ~3 kHz
-/** How strongly sibilant energy closes the mouth. */
-const SIBILANT_CLOSE = 0.6;
+/**
+ * How long an unchanged spectrum counts as no sound at all.
+ *
+ * The SDK swaps its volume provider for a stub when a session ends, and the stub
+ * leaves the caller's buffer untouched instead of zeroing it — so a finished
+ * conversation keeps handing back the last spectrum of the agent mid-word,
+ * forever. Reading that as "audio is playing" is a mouth stuck open.
+ */
+const FROZEN_MS = 250;
 
 export class AgentSession {
   private conversation: Awaited<ReturnType<typeof Conversation.startSession>> | null = null;
@@ -42,13 +41,22 @@ export class AgentSession {
   private stageAt = 0;
   private stage: StageName | null = null;
   private metrics: TurnMetrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
-  /** Absolute offset for alignment, so the mouth follows a multi-chunk reply. */
-  private replyMs = 0;
   /** Reply text already shown token by token, so the final message is not repeated. */
   private streamedReply = "";
   /** Lanes opened outside the mode machine — vad, stt and tts overlap the main stages. */
   private lanes = new Map<StageName, number>();
   private vadOpen = false;
+  /** True between the agent starting and finishing a reply — i.e. is anything playing. */
+  private speaking = false;
+  /** Last spectrum seen, and when it last differed, to catch a frozen buffer. */
+  private lastFingerprint = 0;
+  private changedAt = 0;
+  /**
+   * Signal conditioning belongs to whoever owns the source, so the mouth and the
+   * bench read the same numbers — with this inside the animation loop instead, the
+   * bench's readout described a signal nothing was using.
+   */
+  private sharpen = new Desmoother();
 
   constructor(private deps: AgentSessionDeps) {}
 
@@ -57,29 +65,30 @@ export class AgentSession {
   }
 
   /**
-   * How far the mouth should be open, 0..1, from the spectrum of the audio playing.
-   * Bins are a linear resample of 100-8000 Hz across 1024 slots, not raw FFT bins.
-   * Band choice and why not plain loudness: docs/mouth.md
+   * The spectrum of the audio playing right now, or null when nothing is.
+   *
+   * Null is a distinct answer from a quiet spectrum: it says there is no
+   * measurement to be had, which is the honest state after the socket closes or
+   * once the SDK starts repeating itself. The mouth shuts on both, but only one of
+   * them can be told from real silence.
    */
-  outputLevel(): number {
-    const spectrum = this.conversation?.getOutputByteFrequencyData();
-    if (!spectrum || spectrum.length === 0) {
-      return this.conversation?.getOutputVolume() ?? 0;
+  mouthSpectrum(): Uint8Array | null {
+    if (!this.running || !this.speaking || !this.conversation) return null;
+
+    const spectrum = this.conversation.getOutputByteFrequencyData();
+    if (!spectrum) return null;
+
+    // Cheap fingerprint over a stride: a real spectrum never repeats exactly for a
+    // quarter of a second while audio is playing, and a stub buffer always does.
+    let sum = 0;
+    for (let i = 0; i < spectrum.length; i += 16) sum = (sum * 31 + spectrum[i]) | 0;
+    const now = performance.now();
+    if (sum !== this.lastFingerprint) {
+      this.lastFingerprint = sum;
+      this.changedAt = now;
     }
-
-    const band = (from: number, to: number): number => {
-      const lo = Math.min(spectrum.length - 1, from);
-      const hi = Math.min(spectrum.length, to);
-      let sum = 0;
-      for (let i = lo; i < hi; i++) sum += spectrum[i];
-      return hi > lo ? sum / (hi - lo) / 255 : 0;
-    };
-
-    const jaw = band(JAW_BIN_FROM, JAW_BIN_TO);
-    const sibilant = band(SIBILANT_BIN_FROM, spectrum.length);
-
-    // Sibilants are energetic but nearly closed, so they subtract.
-    return Math.max(0, jaw - sibilant * SIBILANT_CLOSE);
+    if (now - this.changedAt > FROZEN_MS) return null;
+    return this.sharpen.apply(spectrum);
   }
 
   async start(): Promise<void> {
@@ -95,7 +104,7 @@ export class AgentSession {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
         // stage has to be bracketed from other events (see onMessage / onAudio).
         const next: StageName | null = mode === "listening" ? "capture" : "playback";
-        this.deps.onSpeaking(mode === "speaking");
+        this.speaking = mode === "speaking";
         if (mode !== "speaking") this.closeLane("tts", performance.now());
         this.openStage(next);
       },
@@ -156,34 +165,14 @@ export class AgentSession {
         this.openLane("tts", at);
       },
 
-      onAudioAlignment: (alignment) => {
-        // snake_case here, unlike the rest of the SDK's surface.
-        const chars = alignment?.chars ?? [];
-        const starts = alignment?.char_start_times_ms ?? [];
-        const durations = alignment?.char_durations_ms ?? [];
-        if (chars.length === 0) return;
-
-        this.deps.onAlignment(
-          chars,
-          starts.map((ms: number) => this.replyMs + ms),
-          durations,
-        );
-        // Max end, not the last element: the last character need not end latest, and the
-        // error would accumulate across chunks.
-        let end = 0;
-        for (let i = 0; i < starts.length; i++) {
-          end = Math.max(end, (starts[i] ?? 0) + (durations[i] ?? 0));
-        }
-        this.replyMs += end;
-      },
-
-      onInterruption: () => {
-        // A new reply starts from zero, so the mouth's clock has to as well.
-        this.replyMs = 0;
-      },
-
       onDisconnect: (details) => {
         this.running = false;
+        // The mouth reads through `conversation`, and the SDK keeps answering after
+        // the socket closes — with the last thing it played. Dropping the handle
+        // here, as `stop()` already did, is what makes a dropped connection close
+        // the mouth instead of freezing it mid-word.
+        this.conversation = null;
+        this.speaking = false;
         this.closeAllLanes(performance.now());
         this.deps.onEnded(
           details.reason,
@@ -253,13 +242,13 @@ export class AgentSession {
 
   private resetTurn(): void {
     this.metrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
-    this.replyMs = 0;
     this.lanes.clear();
     this.vadOpen = false;
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    this.speaking = false;
     this.closeAllLanes(performance.now());
     const conversation = this.conversation;
     this.conversation = null;

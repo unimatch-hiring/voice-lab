@@ -25,14 +25,6 @@ export interface SttResult {
   words: SttWord[];
 }
 
-/** A chunk from the websocket TTS: audio plus per-character timing. */
-export interface TtsChunk {
-  audio: Int16Array;
-  chars: string[];
-  charStartTimesMs: number[];
-  charDurationsMs: number[];
-}
-
 export type PipelineEvent =
   | { type: "turn-start"; at: number }
   | { type: "stage-start"; stage: StageName; at: number }
@@ -47,5 +39,4 @@ export type PipelineEvent =
   // Input audio level, ~100 Hz. Emitted by capture with a live mic; offline there
   // are no such events and the scene shows 0.
   | { type: "audio-level"; rms: number; at: number }
-  | { type: "tts-chunk"; chunk: TtsChunk; offsetMs: number }
   | { type: "turn-end"; at: number; metrics: TurnMetrics };

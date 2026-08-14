@@ -4,9 +4,9 @@ import type { TurnMetrics } from "./types";
 /**
  * Records conversations off the event stream so we can export them as fixtures.
  *
- * This exists for us, not for the product: offline analysis needs recorded
- * conversations to analyse, and without this there is no way to produce one. It subscribes
- * to the bus like the scene does and never touches the pipeline.
+ * This exists for us, not for the product: analysing a conversation away from the
+ * microphone needs a recording of one, and there is no other way to produce it. It
+ * subscribes to the bus like the scene does and never touches the pipeline.
  */
 
 export interface RecordedLine {

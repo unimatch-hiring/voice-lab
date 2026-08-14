@@ -377,6 +377,15 @@ body {
   height: 100%;
   object-fit: cover;
   user-select: none;
+  /* The sprites are 384 px. Stretching them past that softens the one part of the
+     picture the product is about, on top of whatever the animation does. */
+  image-rendering: auto;
+}
+
+/* Cap the stage at the sprite's own size rather than letting the grid column
+   stretch it. */
+.mouth-stack {
+  max-width: 384px;
 }
 
 /* ── settings drawer ───────────────────────────────────────────────────── */

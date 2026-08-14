@@ -1,0 +1,103 @@
+/* The bench borrows the instrument's shell, panel and transport wholesale — it is
+   the same machine with a file where the microphone goes, and a second visual
+   language would make it read as a different product. Only what the instrument has
+   no equivalent for lives here. */
+
+.bench-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.bench-field select {
+  font: 13px/1 var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--rack-edge);
+  background: var(--rack-sunken);
+  color: var(--rack-ink);
+}
+
+.bench-cut {
+  appearance: none;
+  font: 600 13px/1 var(--sans);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--fail);
+  background: transparent;
+  color: var(--fail);
+  cursor: pointer;
+}
+
+.bench-cut:hover {
+  background: color-mix(in srgb, var(--fail) 14%, transparent);
+}
+
+/* Label and value on one row each: the readout is scanned, not read, so the values
+   line up in a column of their own. */
+.bench-readout {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--rack-edge);
+  border-radius: 8px;
+  background: var(--rack-sunken);
+}
+
+.bench-readout dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.bench-readout dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bench-readout code {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--rack-ink);
+  /* Fixed width so a changing value does not shift what sits beside it. */
+  min-width: 5ch;
+}
+
+.bench-meter {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--field);
+  border: 1px solid var(--rack-edge);
+  overflow: hidden;
+}
+
+.bench-meter i {
+  display: block;
+  height: 100%;
+  background: var(--stage-playback);
+}
+
+.bench-phrase {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--rack-dim);
+  text-wrap: pretty;
+}

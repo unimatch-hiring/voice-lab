@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EventBus } from "./lib/events";
 import { AgentSession } from "./lib/pipeline/agentSession";
-import { VisemeTimeline } from "./lib/visemes";
 import { createTransport } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
@@ -63,30 +62,8 @@ export function App() {
   const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
   // Detection knobs, adjustable between sessions from the settings panel.
 
-  // Speech clock for the mouth. Agents plays the audio itself, so there is no playhead to
-  // read: the clock starts when the agent starts speaking and the alignment timings are
-  // measured from that moment.
-  const speechStart = useRef(0);
-  const agentPlayhead = useMemo(
-    () => ({
-      get elapsedMs() {
-        return speechStart.current === 0 ? 0 : performance.now() - speechStart.current;
-      },
-      get isPlaying() {
-        return speechStart.current !== 0;
-      },
-      enqueue: () => {},
-      stop: () => {},
-    }),
-    [],
-  );
-
-  // The mouth's shape source. With Agents the audio is played by the SDK, so the timeline
-  // is fed from its alignment events instead of from chunks we scheduled ourselves.
-  const timeline = useMemo(() => new VisemeTimeline(), []);
-
   // Fixture recording, ours and off by default: `?record` adds a control that saves the
-  // conversation to a JSON file. Fixtures are read away from the microphone.
+  // conversation to a JSON file.
   const recording = useMemo(() => new URLSearchParams(location.search).has("record"), []);
   const recorder = useMemo(() => new Recorder(bus), [bus]);
   const [savedAs, setSavedAs] = useState<string | null>(null);
@@ -101,9 +78,6 @@ export function App() {
     return new AgentSession({
       bus,
       transport,
-      onAlignment: (chars, startMs, durationMs) => {
-        timeline.appendAbsolute(chars, startMs, durationMs);
-      },
       onTurn: (turn) => {
         setMetrics(turn);
         recorder.addTurn(turn);
@@ -121,14 +95,13 @@ export function App() {
         );
         setEndedBy(reason);
       },
-      onSpeaking: (speaking) => {
-        // Restarting the clock per reply keeps the alignment, which is measured from the
-        // start of each reply, lined up with the audio.
-        speechStart.current = speaking ? performance.now() : 0;
-        if (speaking) timeline.reset();
-      },
     });
-  }, [bus, config, timeline, recorder]);
+  }, [bus, config, recorder]);
+
+  // Stable across renders on purpose. The mouth's animation loop depends on this
+  // callback, and handing it a fresh arrow every render used to tear the loop down
+  // mid-reply and leave the character frozen with its mouth open.
+  const mouthSource = useCallback(() => session.mouthSpectrum(), [session]);
 
   /** Downloads the finished conversation as a fixture file. */
   const saveRecording = () => {
@@ -256,11 +229,7 @@ export function App() {
               <Waterfall bus={bus} />
               <Transcript bus={bus} />
             </div>
-            <Mouth
-              timeline={timeline}
-              playback={agentPlayhead}
-              outputLevel={() => session.outputLevel()}
-            />
+            <Mouth source={mouthSource} />
           </div>
 
           <StageBreakdown metrics={metrics} />
