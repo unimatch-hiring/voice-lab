@@ -18,7 +18,15 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # `branches: [main]` above filters the branch of the run that triggered this one —
+    # and a fork's branch can be called main too. Without the two checks below, opening
+    # a pull request from a fork branch named main is enough to have this job check out
+    # that fork's commit and run it next to the Cloudflare token.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       # This is the one job in the repository that runs with a credential, so it is the
