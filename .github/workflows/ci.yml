@@ -60,3 +60,5 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
+
+# guard check — временная строка, PR будет закрыт
