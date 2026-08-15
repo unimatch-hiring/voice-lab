@@ -1,3 +1,7 @@
+import {
+  requestCode, verifyCode, sessionEmail, listPeople, addPerson, removePerson,
+} from "./signin.js";
+
 /**
  * ALLOWED_ORIGINS is a comma-separated list in an environment variable, e.g.:
  *   "https://unimatch-hiring.github.io,http://localhost:5173"
@@ -15,7 +19,7 @@ function corsHeaders(req, env) {
 
   return {
     "access-control-allow-origin": origin,
-    "access-control-allow-headers": "content-type,x-vibe-token,x-admin-token",
+    "access-control-allow-headers": "content-type,x-vibe-token,x-admin-token,x-admin-session",
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-max-age": "86400", // a day: no preflight on every request
     vary: "Origin",
@@ -128,9 +132,35 @@ export default {
 
     // Interview key management. Guarded by ADMIN_TOKEN, and answers 404 without a KV
     // namespace so a deployment that never bound one does not advertise the feature.
-    if (path.startsWith("/admin/keys")) {
+    // Вход по коду в Slack. Эти два открыты: адрес сам по себе не секрет, а
+    // ответ на запрос кода одинаков для любого адреса — иначе по нему можно
+    // было бы перебрать, у кого есть доступ.
+    if (path === "/admin/signin" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
-      if (!adminAllowed(req, env)) return json({ error: "nope" }, 401);
+      return requestCode(req, env, json);
+    }
+    if (path === "/admin/verify" && req.method === "POST") {
+      if (!env.KEYS) return json({ error: "not found" }, 404);
+      return verifyCode(req, env, json);
+    }
+
+    // Кто вошёл: сессия из кода, либо старый общий пароль. Пароль оставлен
+    // ради первого запуска — список пуст, и войти по коду ещё некому.
+    if (path.startsWith("/admin/")) {
+      if (!env.KEYS) return json({ error: "not found" }, 404);
+      const who = (await sessionEmail(req, env)) ?? (adminAllowed(req, env) ? "bootstrap" : null);
+      if (!who) return json({ error: "nope" }, 401);
+
+      if (path === "/admin/people") {
+        if (req.method === "GET") return listPeople(env, json);
+        if (req.method === "POST") return addPerson(req, env, json);
+      }
+      if (req.method === "DELETE" && path.startsWith("/admin/people/")) {
+        return removePerson(decodeURIComponent(path.slice("/admin/people/".length)), env, json);
+      }
+    }
+
+    if (path.startsWith("/admin/keys")) {
 
       if (req.method === "POST" && path === "/admin/keys") return issueInterviewKey(req, env, json);
       if (req.method === "GET" && path === "/admin/keys") return listInterviewKeys(env, json);
