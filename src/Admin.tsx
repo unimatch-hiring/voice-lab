@@ -13,6 +13,8 @@ import "./scene/tokens.css";
 import "./admin.css";
 
 const TTL_CHOICES = [2, 4, 8];
+/** Digits in the code the Worker sends; `CODE_DIGITS` in `worker/signin.js`. */
+const CODE_LENGTH = 8;
 
 /**
  * Issues the interview keys we hand candidates. Not linked from anywhere — but the
@@ -166,12 +168,12 @@ export function Admin() {
                 inputMode="numeric"
                 autoFocus
                 autoComplete="one-time-code"
-                maxLength={6}
+                maxLength={CODE_LENGTH}
                 placeholder="000000"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               />
-              <button className="talk" type="submit" disabled={busy || code.length !== 6}>
+              <button className="talk" type="submit" disabled={busy || code.length !== CODE_LENGTH}>
                 {busy ? "Checking…" : "Sign in"}
               </button>
               <p className="admin-hint">
