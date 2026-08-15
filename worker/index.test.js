@@ -43,7 +43,7 @@ async function sha256(text) {
 
 /** Puts an address on the list and gives it a live session; returns the header for it. */
 async function signIn(kv, email = "stas@unimatch.ai") {
-  await kv.put(`admin:${email}`, "Stas");
+  await kv.put(`admin:${email}`, "U0STAS");
   await kv.put(`sess:${await sha256(SESSION)}`, email);
   return { "x-admin-session": SESSION };
 }
@@ -51,11 +51,8 @@ async function signIn(kv, email = "stas@unimatch.ai") {
 /** Slack double: records what the bot was asked to send. */
 function stubSlack() {
   const sent = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-    if (String(url).endsWith("users.lookupByEmail")) {
-      return new Response(JSON.stringify({ ok: true, user: { id: "U1" } }));
-    }
-    sent.push(JSON.parse(String(init.body)).text);
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    sent.push(JSON.parse(String(init.body)));
     return new Response(JSON.stringify({ ok: true }));
   });
   return sent;
@@ -265,23 +262,41 @@ describe("signing in by code", () => {
   it("answers an unlisted address exactly as it answers a listed one", async () => {
     stubSlack();
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
 
-    const listed = await askFor(LISTED, e, fakeCtx());
-    const stranger = await askFor("someone@example.com", e, fakeCtx());
+    const ctx = fakeCtx();
+    const listed = await askFor(LISTED, e, ctx);
+    const stranger = await askFor("someone@example.com", e, ctx);
 
     expect(stranger.status).toBe(listed.status);
     expect(await stranger.text()).toBe(await listed.text());
+    await ctx.settle(); // deferred work outlives the test otherwise, and lands in the next one
   });
 
-  it("replies before the Slack call, so a stopwatch cannot read the list either", async () => {
+  it("answers without waiting for the write, so a stopwatch cannot read the list", async () => {
+    // Anything awaited before the reply — the DM, or a KV write — makes the listed address
+    // answer slower, and the clock reads the list as plainly as different bodies would.
+    stubSlack();
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
+    e.KEYS.put = () => new Promise(() => {}); // a write that never lands
+
+    const outcome = await Promise.race([
+      askFor(LISTED, e, fakeCtx()).then(() => "answered"),
+      new Promise((r) => setTimeout(() => r("still waiting"), 50)),
+    ]);
+
+    expect(outcome).toBe("answered");
+  });
+
+  it("sends the code after the answer, never before it", async () => {
     const sent = stubSlack();
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
     const ctx = fakeCtx();
 
     await askFor(LISTED, e, ctx);
-    expect(sent).toEqual([]); // still nothing sent when the caller already has its answer
+    expect(sent).toEqual([]);
 
     await ctx.settle();
     expect(sent).toHaveLength(1);
@@ -290,13 +305,13 @@ describe("signing in by code", () => {
   it("sends a code long enough that guessing it is hopeless", async () => {
     const sent = stubSlack();
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
     const ctx = fakeCtx();
 
     await askFor(LISTED, e, ctx);
     await ctx.settle();
 
-    expect(sent[0]).toMatch(/\b\d{8}\b/);
+    expect(sent[0].text).toMatch(/\b\d{8}\b/);
   });
 
   async function signInFor(email, e) {
@@ -304,14 +319,14 @@ describe("signing in by code", () => {
     const ctx = fakeCtx();
     await askFor(email, e, ctx);
     await ctx.settle();
-    const code = sent[0].match(/\d{8}/)[0];
+    const code = sent[0].text.match(/\d{8}/)[0];
     const r = await worker.fetch(req("/admin/verify", { body: { email, code } }), e);
     return { code, body: await r.json(), status: r.status };
   }
 
   it("trades a correct code for a session", async () => {
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
 
     const { body } = await signInFor(LISTED, e);
     expect(body.session).toMatch(/^[0-9a-f]{48}$/);
@@ -325,7 +340,7 @@ describe("signing in by code", () => {
 
   it("spends the code on first use, so a second try with it fails", async () => {
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
     const { code } = await signInFor(LISTED, e);
 
     const again = await worker.fetch(req("/admin/verify", { body: { email: LISTED, code } }), e);
@@ -334,7 +349,7 @@ describe("signing in by code", () => {
 
   it("keeps no session token in the clear: the store is not a way in", async () => {
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
     const { body } = await signInFor(LISTED, e);
 
     expect(e.KEYS.store.has(`sess:${body.session}`)).toBe(false);
@@ -343,12 +358,12 @@ describe("signing in by code", () => {
 
   it("burns the code after five wrong guesses", async () => {
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
     const sent = stubSlack();
     const ctx = fakeCtx();
     await askFor(LISTED, e, ctx);
     await ctx.settle();
-    const code = sent[0].match(/\d{8}/)[0];
+    const code = sent[0].text.match(/\d{8}/)[0];
 
     for (let i = 0; i < 5; i++) {
       await worker.fetch(req("/admin/verify", { body: { email: LISTED, code: "00000000" } }), e);
@@ -360,7 +375,7 @@ describe("signing in by code", () => {
 
   it("stops guessing when the rate limiter says to", async () => {
     const e = env({ VERIFY_LIMIT: { limit: async () => ({ success: false }) } });
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
 
     const r = await worker.fetch(req("/admin/verify", { body: { email: LISTED, code: "1" } }), e);
     expect(r.status).toBe(429);
@@ -368,7 +383,7 @@ describe("signing in by code", () => {
 
   it("locks out a live session the moment the person leaves the list", async () => {
     const e = env();
-    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
     const { body } = await signInFor(LISTED, e);
     const headers = { "x-admin-session": body.session };
 

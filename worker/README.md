@@ -58,11 +58,12 @@ There is no admin password to pass around. The interviewer types their work emai
 | `POST /admin/verify` | `{email, code}` → `{session, email}` |
 | `GET/POST /admin/people`, `DELETE /admin/people/:email` | the allowlist |
 
-`SLACK_BOT_TOKEN` is a Worker secret, shared with Hermes. The Worker calls exactly two
-Slack methods: `users.lookupByEmail` and `chat.postMessage`.
+`SLACK_BOT_TOKEN` is a Worker secret, shared with Hermes. The Worker calls one Slack
+method, `chat.postMessage`, so `chat:write` is the only scope it depends on.
 
-The allowlist lives in KV under `admin:<email>`, so adding somebody is a write, not a
-deploy. Removing them ends their live sessions at once — every request re-checks the list.
+The allowlist lives in KV as `admin:<email>` → their Slack user ID, which is where the
+code is sent; the address only names them. Adding somebody is a write, not a deploy, and
+removing them ends their live sessions at once — every request re-checks the list.
 
 The code is eight digits, single use, dead after ten minutes or five wrong tries. Eight
 rather than the customary six because the try counter lives in KV, which is not atomic

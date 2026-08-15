@@ -66,27 +66,25 @@ function randomToken() {
 }
 
 /**
- * DMs a person.
+ * DMs a person by Slack user ID.
  *
- * The bot token is shared with Hermes and can do more than is needed here, so this
- * worker touches exactly two Slack methods and no others.
+ * By ID rather than by address: resolving an address needs `users:read.email`, and this
+ * token is shared with Hermes — addressing the DM directly keeps the only scope we depend
+ * on down to `chat:write`.
  */
-async function slackDm(env, email, text) {
-  const call = async (method, params) => {
-    const r = await fetch(`https://slack.com/api/${method}`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-        "content-type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify(params),
-    });
-    return r.json();
-  };
-
-  const found = await call("users.lookupByEmail", { email });
-  if (!found.ok) return false;
-  const sent = await call("chat.postMessage", { channel: found.user.id, text });
+async function slackDm(env, userId, text) {
+  const r = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ channel: userId, text }),
+  });
+  const sent = await r.json();
+  // Undelivered looks exactly like never-requested from the outside, so the reason has to
+  // land somewhere. A missing scope cost us an afternoon of silence.
+  if (!sent.ok) console.error("slack dm failed", sent.error);
   return sent.ok === true;
 }
 
@@ -106,25 +104,30 @@ export async function requestCode(req, env, json, ctx) {
 
   if (!(await withinLimit(env.SIGNIN_LIMIT, email))) return same();
 
-  const person = await env.KEYS.get(`admin:${email}`);
-  if (!person) return same();
+  const slackId = await env.KEYS.get(`admin:${email}`);
+  if (!slackId) return same();
 
-  const rateKey = `otprate:${email}`;
-  const used = Number((await env.KEYS.get(rateKey)) ?? 0);
-  if (used >= CODE_LIMIT) return same();
-  await env.KEYS.put(rateKey, String(used + 1), { expirationTtl: CODE_LIMIT_WINDOW });
+  // Everything from here — two KV writes and the DM — happens after the response. Both
+  // addresses have now cost one limiter call and one read, so they answer alike; the
+  // recipient reads Slack seconds later, long after this has landed.
+  const issue = async () => {
+    const rateKey = `otprate:${email}`;
+    const used = Number((await env.KEYS.get(rateKey)) ?? 0);
+    if (used >= CODE_LIMIT) return;
+    await env.KEYS.put(rateKey, String(used + 1), { expirationTtl: CODE_LIMIT_WINDOW });
 
-  const code = digits(CODE_DIGITS);
-  // Store a hash: reading the KV store must not be enough to sign in.
-  await env.KEYS.put(
-    `otp:${email}`,
-    JSON.stringify({ hash: await sha256(`${email}:${code}`), tries: 0 }),
-    { expirationTtl: CODE_TTL_SECONDS },
-  );
+    const code = digits(CODE_DIGITS);
+    // Store a hash: reading the KV store must not be enough to sign in.
+    await env.KEYS.put(
+      `otp:${email}`,
+      JSON.stringify({ hash: await sha256(`${email}:${code}`), tries: 0 }),
+      { expirationTtl: CODE_TTL_SECONDS },
+    );
+    await slackDm(env, slackId, `voice-lab admin code: *${code}*\nGood for 10 minutes.`);
+  };
 
-  const dm = slackDm(env, email, `voice-lab admin code: *${code}*\nGood for 10 minutes.`);
-  if (ctx?.waitUntil) ctx.waitUntil(dm);
-  else await dm;
+  if (ctx?.waitUntil) ctx.waitUntil(issue());
+  else await issue();
   return same();
 }
 
@@ -183,7 +186,7 @@ export async function listPeople(env, json) {
   const people = await Promise.all(
     keys.map(async ({ name }) => ({
       email: name.slice("admin:".length),
-      name: (await env.KEYS.get(name)) || "",
+      slack: (await env.KEYS.get(name)) || "",
     })),
   );
   return json({ people });
@@ -192,9 +195,12 @@ export async function listPeople(env, json) {
 export async function addPerson(req, env, json) {
   const body = await req.json().catch(() => ({}));
   const email = normalise(body.email);
+  const slack = String(body.slack ?? "").trim();
   if (!email.includes("@")) return json({ error: "email required" }, 400);
-  await env.KEYS.put(`admin:${email}`, String(body.name ?? "").slice(0, 80));
-  return json({ email });
+  // The address only names the person; this is where their code actually goes.
+  if (!/^[UW][A-Z0-9]{6,}$/.test(slack)) return json({ error: "slack user id required" }, 400);
+  await env.KEYS.put(`admin:${email}`, slack);
+  return json({ email, slack });
 }
 
 export async function removePerson(email, env, json) {
