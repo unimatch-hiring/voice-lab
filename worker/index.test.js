@@ -7,10 +7,15 @@ const ORIGIN = "http://localhost:5173";
 function fakeKv(initial = {}) {
   const store = new Map(Object.entries(initial));
   const ttls = new Map();
+  const reads = [];
   return {
     store,
     ttls,
-    get: async (k) => store.get(k) ?? null,
+    reads,
+    get: async (k) => {
+      reads.push(k);
+      return store.get(k) ?? null;
+    },
     put: async (k, v, opts) => {
       store.set(k, v);
       if (opts?.expirationTtl) ttls.set(k, opts.expirationTtl);
@@ -273,20 +278,30 @@ describe("signing in by code", () => {
     await ctx.settle(); // deferred work outlives the test otherwise, and lands in the next one
   });
 
-  it("answers without waiting for the write, so a stopwatch cannot read the list", async () => {
-    // Anything awaited before the reply — the DM, or a KV write — makes the listed address
-    // answer slower, and the clock reads the list as plainly as different bodies would.
+  it("touches no storage before replying, so the clock cannot read the list either", async () => {
+    // Identical bodies are not enough: a KV hit and a KV miss cost different amounts —
+    // 39ms against 102ms, measured — so any lookup before the reply discloses membership.
     stubSlack();
     const e = env();
     await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
-    e.KEYS.put = () => new Promise(() => {}); // a write that never lands
+    const ctx = fakeCtx();
 
-    const outcome = await Promise.race([
-      askFor(LISTED, e, fakeCtx()).then(() => "answered"),
-      new Promise((r) => setTimeout(() => r("still waiting"), 50)),
-    ]);
+    // Reads are given real latency: an instant double resolves in microtasks and cannot
+    // show whether the reply waited for one.
+    const order = [];
+    const read = e.KEYS.get.bind(e.KEYS);
+    e.KEYS.get = async (k) => {
+      await new Promise((r) => setTimeout(r, 0));
+      order.push(`read ${k}`);
+      return read(k);
+    };
 
-    expect(outcome).toBe("answered");
+    await askFor(LISTED, e, ctx);
+    order.push("replied");
+
+    expect(order[0]).toBe("replied");
+    await ctx.settle();
+    expect(order).toContain(`read admin:${LISTED}`);
   });
 
   it("sends the code after the answer, never before it", async () => {
