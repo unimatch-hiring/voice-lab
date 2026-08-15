@@ -34,6 +34,39 @@ function env(over = {}) {
   };
 }
 
+const SESSION = "admin-session-token";
+
+async function sha256(text) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Puts an address on the list and gives it a live session; returns the header for it. */
+async function signIn(kv, email = "stas@unimatch.ai") {
+  await kv.put(`admin:${email}`, "Stas");
+  await kv.put(`sess:${await sha256(SESSION)}`, email);
+  return { "x-admin-session": SESSION };
+}
+
+/** Slack double: records what the bot was asked to send. */
+function stubSlack() {
+  const sent = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    if (String(url).endsWith("users.lookupByEmail")) {
+      return new Response(JSON.stringify({ ok: true, user: { id: "U1" } }));
+    }
+    sent.push(JSON.parse(String(init.body)).text);
+    return new Response(JSON.stringify({ ok: true }));
+  });
+  return sent;
+}
+
+/** Stands in for the Worker's execution context, holding whatever was deferred. */
+function fakeCtx() {
+  const deferred = [];
+  return { waitUntil: (p) => deferred.push(p), settle: () => Promise.all(deferred) };
+}
+
 function req(path, { method = "POST", origin = ORIGIN, headers = {}, body } = {}) {
   return new Request(`https://worker.test${path}`, {
     method,
@@ -93,7 +126,7 @@ describe("issuing interview keys", () => {
   it("issues a prefixed key and stores it under a TTL", async () => {
     const e = env();
     const r = await worker.fetch(
-      req("/admin/keys", { headers: { "x-admin-token": "admin-secret" }, body: { hours: 4, label: "Ivan" } }),
+      req("/admin/keys", { headers: await signIn(e.KEYS), body: { hours: 4, label: "Ivan" } }),
       e,
     );
     const issued = await r.json();
@@ -105,10 +138,9 @@ describe("issuing interview keys", () => {
 
   it("issues distinct keys, so one candidate's key never unlocks another's", async () => {
     const e = env();
+    const headers = await signIn(e.KEYS);
     const call = () =>
-      worker
-        .fetch(req("/admin/keys", { headers: { "x-admin-token": "admin-secret" }, body: {} }), e)
-        .then((r) => r.json());
+      worker.fetch(req("/admin/keys", { headers, body: {} }), e).then((r) => r.json());
     const [a, b] = await Promise.all([call(), call()]);
     expect(a.token).not.toBe(b.token);
   });
@@ -118,7 +150,7 @@ describe("issuing interview keys", () => {
     // the page show "expired" while the Worker still minted tokens for that key.
     const e = env();
     const r = await worker.fetch(
-      req("/admin/keys", { headers: { "x-admin-token": "admin-secret" }, body: { hours: 0.001 } }),
+      req("/admin/keys", { headers: await signIn(e.KEYS), body: { hours: 0.001 } }),
       e,
     );
     const issued = await r.json();
@@ -128,9 +160,10 @@ describe("issuing interview keys", () => {
   });
 
   it("refuses a TTL beyond the cap", async () => {
+    const e = env();
     const r = await worker.fetch(
-      req("/admin/keys", { headers: { "x-admin-token": "admin-secret" }, body: { hours: 999 } }),
-      env(),
+      req("/admin/keys", { headers: await signIn(e.KEYS), body: { hours: 999 } }),
+      e,
     );
     expect(r.status).toBe(400);
   });
@@ -144,9 +177,17 @@ describe("issuing interview keys", () => {
     expect(r.status).toBe(401);
   });
 
+  it("refuses the bootstrap password: keys take a named person, not a shared string", async () => {
+    const r = await worker.fetch(
+      req("/admin/keys", { headers: { "x-admin-token": "admin-secret" } }),
+      env(),
+    );
+    expect(r.status).toBe(401);
+  });
+
   it("refuses admin endpoints when no ADMIN_TOKEN is configured", async () => {
     const r = await worker.fetch(
-      req("/admin/keys", { headers: { "x-admin-token": "" } }),
+      req("/admin/people", { method: "GET", headers: { "x-admin-token": "" } }),
       env({ ADMIN_TOKEN: undefined }),
     );
     expect(r.status).toBe(401);
@@ -162,7 +203,7 @@ describe("listing and revoking", () => {
       }),
     });
     const r = await worker.fetch(
-      req("/admin/keys", { method: "GET", headers: { "x-admin-token": "admin-secret" } }),
+      req("/admin/keys", { method: "GET", headers: await signIn(e.KEYS) }),
       e,
     );
     expect((await r.json()).keys.map((k) => k.label)).toEqual(["new", "old"]);
@@ -172,11 +213,11 @@ describe("listing and revoking", () => {
     // A record written by an older version, or by hand, has no expiresAt.
     const e = env({ KEYS: fakeKv({ "key:vibe_partial": JSON.stringify({ label: "old" }) }) });
     const r = await worker.fetch(
-      req("/admin/keys", { method: "GET", headers: { "x-admin-token": "admin-secret" } }),
+      req("/admin/keys", { method: "GET", headers: await signIn(e.KEYS) }),
       e,
     );
 
-    const [key] = (await r.json()).keys;
+    const [key] = (await r.json()).keys.filter((k) => k.token.startsWith("vibe_"));
     expect(Number.isFinite(key.expiresAt)).toBe(true);
     expect(Number.isFinite(key.issuedAt)).toBe(true);
   });
@@ -184,7 +225,7 @@ describe("listing and revoking", () => {
   it("revokes the key the caller named, not its percent-encoded spelling", async () => {
     const e = env({ KEYS: fakeKv({ "key:vibe_a/b": "{}" }) });
     const r = await worker.fetch(
-      req("/admin/keys/vibe_a%2Fb", { method: "DELETE", headers: { "x-admin-token": "admin-secret" } }),
+      req("/admin/keys/vibe_a%2Fb", { method: "DELETE", headers: await signIn(e.KEYS) }),
       e,
     );
 
@@ -193,9 +234,10 @@ describe("listing and revoking", () => {
   });
 
   it("says so when there was nothing to revoke, instead of reporting success", async () => {
+    const e = env();
     const r = await worker.fetch(
-      req("/admin/keys/vibe_missing", { method: "DELETE", headers: { "x-admin-token": "admin-secret" } }),
-      env(),
+      req("/admin/keys/vibe_missing", { method: "DELETE", headers: await signIn(e.KEYS) }),
+      e,
     );
 
     expect(r.status).toBe(404);
@@ -204,11 +246,142 @@ describe("listing and revoking", () => {
   it("revoking removes the key, and the holder immediately loses access", async () => {
     const e = env({ KEYS: fakeKv({ "key:vibe_abc": "{}" }) });
     await worker.fetch(
-      req("/admin/keys/vibe_abc", { method: "DELETE", headers: { "x-admin-token": "admin-secret" } }),
+      req("/admin/keys/vibe_abc", { method: "DELETE", headers: await signIn(e.KEYS) }),
       e,
     );
 
     const after = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_abc" } }), e);
     expect(after.status).toBe(401);
+  });
+});
+
+describe("signing in by code", () => {
+  const LISTED = "stas@unimatch.ai";
+
+  async function askFor(email, e, ctx) {
+    return worker.fetch(req("/admin/signin", { body: { email } }), e, ctx);
+  }
+
+  it("answers an unlisted address exactly as it answers a listed one", async () => {
+    stubSlack();
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+
+    const listed = await askFor(LISTED, e, fakeCtx());
+    const stranger = await askFor("someone@example.com", e, fakeCtx());
+
+    expect(stranger.status).toBe(listed.status);
+    expect(await stranger.text()).toBe(await listed.text());
+  });
+
+  it("replies before the Slack call, so a stopwatch cannot read the list either", async () => {
+    const sent = stubSlack();
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    const ctx = fakeCtx();
+
+    await askFor(LISTED, e, ctx);
+    expect(sent).toEqual([]); // still nothing sent when the caller already has its answer
+
+    await ctx.settle();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("sends a code long enough that guessing it is hopeless", async () => {
+    const sent = stubSlack();
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    const ctx = fakeCtx();
+
+    await askFor(LISTED, e, ctx);
+    await ctx.settle();
+
+    expect(sent[0]).toMatch(/\b\d{8}\b/);
+  });
+
+  async function signInFor(email, e) {
+    const sent = stubSlack();
+    const ctx = fakeCtx();
+    await askFor(email, e, ctx);
+    await ctx.settle();
+    const code = sent[0].match(/\d{8}/)[0];
+    const r = await worker.fetch(req("/admin/verify", { body: { email, code } }), e);
+    return { code, body: await r.json(), status: r.status };
+  }
+
+  it("trades a correct code for a session", async () => {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+
+    const { body } = await signInFor(LISTED, e);
+    expect(body.session).toMatch(/^[0-9a-f]{48}$/);
+
+    const keys = await worker.fetch(
+      req("/admin/keys", { method: "GET", headers: { "x-admin-session": body.session } }),
+      e,
+    );
+    expect(keys.status).toBe(200);
+  });
+
+  it("spends the code on first use, so a second try with it fails", async () => {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    const { code } = await signInFor(LISTED, e);
+
+    const again = await worker.fetch(req("/admin/verify", { body: { email: LISTED, code } }), e);
+    expect(again.status).toBe(401);
+  });
+
+  it("keeps no session token in the clear: the store is not a way in", async () => {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    const { body } = await signInFor(LISTED, e);
+
+    expect(e.KEYS.store.has(`sess:${body.session}`)).toBe(false);
+    expect([...e.KEYS.store.values()]).not.toContain(body.session);
+  });
+
+  it("burns the code after five wrong guesses", async () => {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    const sent = stubSlack();
+    const ctx = fakeCtx();
+    await askFor(LISTED, e, ctx);
+    await ctx.settle();
+    const code = sent[0].match(/\d{8}/)[0];
+
+    for (let i = 0; i < 5; i++) {
+      await worker.fetch(req("/admin/verify", { body: { email: LISTED, code: "00000000" } }), e);
+    }
+
+    const honest = await worker.fetch(req("/admin/verify", { body: { email: LISTED, code } }), e);
+    expect(honest.status).toBe(401);
+  });
+
+  it("stops guessing when the rate limiter says to", async () => {
+    const e = env({ VERIFY_LIMIT: { limit: async () => ({ success: false }) } });
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+
+    const r = await worker.fetch(req("/admin/verify", { body: { email: LISTED, code: "1" } }), e);
+    expect(r.status).toBe(429);
+  });
+
+  it("locks out a live session the moment the person leaves the list", async () => {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "Stas");
+    const { body } = await signInFor(LISTED, e);
+    const headers = { "x-admin-session": body.session };
+
+    expect((await worker.fetch(req("/admin/keys", { method: "GET", headers }), e)).status).toBe(200);
+
+    await worker.fetch(
+      req(`/admin/people/${encodeURIComponent(LISTED)}`, {
+        method: "DELETE",
+        headers: { "x-admin-token": "admin-secret" },
+      }),
+      e,
+    );
+
+    expect((await worker.fetch(req("/admin/keys", { method: "GET", headers }), e)).status).toBe(401);
   });
 });

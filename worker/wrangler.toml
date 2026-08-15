@@ -18,3 +18,20 @@ ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http:
 [[kv_namespaces]]
 binding = "KEYS"
 id = "5fc3e04365264ee897f5569ea3aafbbe"
+
+# Brute-force cost on sign-in, keyed by the address being signed into. Counts per
+# Cloudflare location and is permissive by design, so it raises the price of a guessing
+# script rather than capping it — the eight-digit code is what makes the attempt futile.
+[[ratelimits]]
+name = "SIGNIN_LIMIT"
+namespace_id = "1001"
+[ratelimits.simple]
+limit = 5
+period = 60
+
+[[ratelimits]]
+name = "VERIFY_LIMIT"
+namespace_id = "1002"
+[ratelimits.simple]
+limit = 10
+period = 60

@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { Admin } from "./Admin";
 
 describe("admin route", () => {
-  it("asks for the password before showing anything about keys", async () => {
+  it("asks who is signing in before showing anything about keys", async () => {
     render(<Admin />);
 
-    expect(await screen.findByLabelText(/admin password/i)).toBeTruthy();
+    expect(await screen.findByLabelText(/work email/i)).toBeTruthy();
     expect(screen.queryByText(/issue key/i)).toBeNull();
     expect(screen.queryByText(/active keys/i)).toBeNull();
   });

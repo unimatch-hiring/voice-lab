@@ -3,6 +3,8 @@ import {
   AdminUnauthorized,
   createAdminClient,
   formatRemaining,
+  requestCode,
+  verifyCode,
   type InterviewKey,
 } from "./lib/adminKeys";
 import { loadConfig } from "./lib/config";
@@ -14,11 +16,14 @@ const TTL_CHOICES = [2, 4, 8];
 
 /**
  * Issues the interview keys we hand candidates. Not linked from anywhere — but the
- * protection is the password, not the obscurity of the path: this route mints credentials
+ * protection is the sign-in, not the obscurity of the path: this route mints credentials
  * that spend our ElevenLabs quota.
  */
 export function Admin() {
-  const [password, setPassword] = useState("");
+  const [session, setSession] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [keys, setKeys] = useState<InterviewKey[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -44,13 +49,13 @@ export function Admin() {
     [workerUrl],
   );
 
-  // The password survives a reload the same way the candidate token does — encrypted under
+  // The session survives a reload the same way the candidate token does — encrypted under
   // a non-extractable key — so a refresh mid-interview does not lock us out of our own tool.
   useEffect(() => {
     let alive = true;
     loadAdminToken().then((saved) => {
       if (!alive || !saved) return;
-      setPassword(saved);
+      setSession(saved);
       refresh(saved).catch(() => clearAdminToken());
     });
     return () => {
@@ -69,24 +74,16 @@ export function Admin() {
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof AdminUnauthorized ? "Wrong password." : String(e));
+      setError(e instanceof AdminUnauthorized ? "That code did not work." : String(e));
       if (e instanceof AdminUnauthorized) setAuthed(false);
     } finally {
       setBusy(false);
     }
   };
 
-  const signIn = (e: React.FormEvent) => {
-    e.preventDefault();
-    run(async () => {
-      await refresh(password);
-      await saveAdminToken(password);
-    });
-  };
-
   const issue = () =>
     run(async () => {
-      const client = createAdminClient(workerUrl, password);
+      const client = createAdminClient(workerUrl, session);
       const key = await client.issue(hours, label.trim());
       setFresh(key);
       setCopied(false);
@@ -96,7 +93,7 @@ export function Admin() {
 
   const revoke = (token: string) =>
     run(async () => {
-      const client = createAdminClient(workerUrl, password);
+      const client = createAdminClient(workerUrl, session);
       await client.revoke(token);
       if (fresh?.token === token) setFresh(null);
       setKeys(await client.list());
@@ -110,9 +107,30 @@ export function Admin() {
   const signOut = () => {
     clearAdminToken();
     setAuthed(false);
-    setPassword("");
+    setSession("");
     setKeys([]);
     setFresh(null);
+  };
+
+  /** Step one. The worker answers the same for any address, so there is nothing to branch on. */
+  const askCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    run(async () => {
+      await requestCode(workerUrl, email);
+      setCodeSent(true);
+    });
+  };
+
+  /** Step two: the code buys a session, and the page carries on as before. */
+  const enterCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    run(async () => {
+      const granted = await verifyCode(workerUrl, email, code);
+      await saveAdminToken(granted);
+      setSession(granted);
+      await refresh(granted);
+      setCode("");
+    });
   };
 
   if (!authed) {
@@ -120,23 +138,59 @@ export function Admin() {
       <main className="shell admin-shell">
         <header className="masthead">
           <h1>voice-lab admin</h1>
-          <p>Interview keys.</p>
+          <p>The code arrives as a Slack DM from our bot.</p>
         </header>
         <section className="panel">
-          <form className="panel-body admin-signin" onSubmit={signIn}>
-            <label htmlFor="admin-pw">Admin password</label>
-            <input
-              id="admin-pw"
-              type="password"
-              autoFocus
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button className="talk" type="submit" disabled={busy || !password}>
-              {busy ? "Checking…" : "Sign in"}
-            </button>
-            {error && <p className="admin-error">{error}</p>}
-          </form>
+          {!codeSent ? (
+            <form className="panel-body admin-signin" onSubmit={askCode}>
+              <label htmlFor="admin-email">Work email</label>
+              <input
+                id="admin-email"
+                type="email"
+                autoFocus
+                autoComplete="email"
+                placeholder="you@unimatch.ai"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <button className="talk" type="submit" disabled={busy || !email.includes("@")}>
+                {busy ? "Sending…" : "Send me a code"}
+              </button>
+              {error && <p className="admin-error">{error}</p>}
+            </form>
+          ) : (
+            <form className="panel-body admin-signin" onSubmit={enterCode}>
+              <label htmlFor="admin-code">Code from Slack</label>
+              <input
+                id="admin-code"
+                inputMode="numeric"
+                autoFocus
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="000000"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              />
+              <button className="talk" type="submit" disabled={busy || code.length !== 6}>
+                {busy ? "Checking…" : "Sign in"}
+              </button>
+              <p className="admin-hint">
+                If the address is on the list, the code is already in your DMs. Good for 10
+                minutes.{" "}
+                <button
+                  type="button"
+                  className="admin-linkish"
+                  onClick={() => {
+                    setCodeSent(false);
+                    setCode("");
+                  }}
+                >
+                  Use another address
+                </button>
+              </p>
+              {error && <p className="admin-error">{error}</p>}
+            </form>
+          )}
         </section>
       </main>
     );

@@ -67,8 +67,13 @@ async function callerAllowed(req, env) {
   return (await env.KEYS.get(`key:${token}`)) !== null;
 }
 
-/** Admin endpoints answer only to ADMIN_TOKEN — never to a key we handed a candidate. */
-function adminAllowed(req, env) {
+/**
+ * The shared password, kept for one job only: seeding the allowlist when it is empty,
+ * and getting back in if Slack is down. It cannot mint interview keys — otherwise this
+ * one static string, which never expires and names nobody, would still be the real
+ * credential and the sign-in below would be decoration.
+ */
+function bootstrapAllowed(req, env) {
   return Boolean(env.ADMIN_TOKEN) && secretEquals(req.headers.get("x-admin-token") ?? "", env.ADMIN_TOKEN);
 }
 
@@ -115,7 +120,7 @@ async function listInterviewKeys(env, json) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const cors = corsHeaders(req, env);
     const json = (body, status = 200) =>
       new Response(JSON.stringify(body), {
@@ -132,23 +137,26 @@ export default {
 
     // Interview key management. Guarded by ADMIN_TOKEN, and answers 404 without a KV
     // namespace so a deployment that never bound one does not advertise the feature.
-    // Вход по коду в Slack. Эти два открыты: адрес сам по себе не секрет, а
-    // ответ на запрос кода одинаков для любого адреса — иначе по нему можно
-    // было бы перебрать, у кого есть доступ.
+    // Sign-in by Slack code. Both are open: an address is not a secret, and the
+    // answer to a code request is the same for every address — anything else would
+    // let a stranger enumerate who has access.
     if (path === "/admin/signin" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
-      return requestCode(req, env, json);
+      return requestCode(req, env, json, ctx);
     }
     if (path === "/admin/verify" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
       return verifyCode(req, env, json);
     }
 
-    // Кто вошёл: сессия из кода, либо старый общий пароль. Пароль оставлен
-    // ради первого запуска — список пуст, и войти по коду ещё некому.
     if (path.startsWith("/admin/")) {
       if (!env.KEYS) return json({ error: "not found" }, 404);
-      const who = (await sessionEmail(req, env)) ?? (adminAllowed(req, env) ? "bootstrap" : null);
+      const signedIn = await sessionEmail(req, env);
+      // Minting keys spends our ElevenLabs quota, so it takes a named person who passed
+      // a code. The allowlist itself also answers to the bootstrap password.
+      const who = signedIn ?? (path.startsWith("/admin/people") && bootstrapAllowed(req, env)
+        ? "bootstrap"
+        : null);
       if (!who) return json({ error: "nope" }, 401);
 
       if (path === "/admin/people") {

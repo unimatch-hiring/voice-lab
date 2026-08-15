@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { AdminUnauthorized, createAdminClient, formatRemaining } from "./adminKeys";
+import {
+  AdminUnauthorized,
+  createAdminClient,
+  formatRemaining,
+  requestCode,
+  verifyCode,
+} from "./adminKeys";
 
 const URL_BASE = "https://worker.test";
 
@@ -8,16 +14,16 @@ function okJson(body: unknown) {
 }
 
 describe("admin client", () => {
-  it("sends the admin password, never the candidate token header", async () => {
+  it("sends the session, never the candidate token header", async () => {
     const fetchImpl = okJson({ keys: [] });
-    await createAdminClient(URL_BASE, "secret", fetchImpl).list();
+    await createAdminClient(URL_BASE, "session-1", fetchImpl).list();
 
     const headers = fetchImpl.mock.calls[0][1]?.headers as Record<string, string>;
-    expect(headers["x-admin-token"]).toBe("secret");
+    expect(headers["x-admin-session"]).toBe("session-1");
     expect(headers["x-vibe-token"]).toBeUndefined();
   });
 
-  it("reports a wrong password distinctly from a broken worker", async () => {
+  it("reports a dead session distinctly from a broken worker", async () => {
     const unauthorized = vi.fn<typeof fetch>(async () => new Response("{}", { status: 401 }));
     await expect(createAdminClient(URL_BASE, "bad", unauthorized).list()).rejects.toBeInstanceOf(
       AdminUnauthorized,
@@ -34,6 +40,37 @@ describe("admin client", () => {
     await createAdminClient(URL_BASE, "secret", fetchImpl).revoke("vibe_a/../b");
 
     expect(fetchImpl.mock.calls[0][0]).toBe(`${URL_BASE}/admin/keys/vibe_a%2F..%2Fb`);
+  });
+});
+
+describe("sign-in by code", () => {
+  it("asks for the code by email, so nothing has to be typed from another screen", async () => {
+    const fetchImpl = okJson({ ok: true });
+    await requestCode(URL_BASE, "someone@unimatch.ai", fetchImpl);
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${URL_BASE}/admin/signin`);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({
+      email: "someone@unimatch.ai",
+    });
+  });
+
+  it("returns the session the worker minted", async () => {
+    const fetchImpl = okJson({ session: "sess-1", email: "someone@unimatch.ai" });
+    await expect(verifyCode(URL_BASE, "someone@unimatch.ai", "123456", fetchImpl)).resolves.toBe(
+      "sess-1",
+    );
+  });
+
+  it("tells a wrong code apart from a broken worker", async () => {
+    const rejected = vi.fn<typeof fetch>(async () => new Response("{}", { status: 401 }));
+    await expect(
+      verifyCode(URL_BASE, "someone@unimatch.ai", "000000", rejected),
+    ).rejects.toBeInstanceOf(AdminUnauthorized);
+
+    const broken = vi.fn<typeof fetch>(async () => new Response("{}", { status: 500 }));
+    await expect(
+      verifyCode(URL_BASE, "someone@unimatch.ai", "000000", broken),
+    ).rejects.not.toBeInstanceOf(AdminUnauthorized);
   });
 });
 
