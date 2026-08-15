@@ -2,7 +2,7 @@
  * Admin sign-in by a code sent over Slack.
  *
  * Replaces the shared password: the interviewer types their work email, the bot DMs
- * them six digits, they type those. Nothing to remember, nothing to pass between
+ * them a code, they type it. Nothing to remember, nothing to pass between
  * people, and access is revoked one person at a time.
  *
  * The allowlist lives in KV rather than an environment variable — otherwise adding

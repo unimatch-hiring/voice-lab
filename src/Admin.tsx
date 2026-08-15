@@ -169,7 +169,7 @@ export function Admin() {
                 autoFocus
                 autoComplete="one-time-code"
                 maxLength={CODE_LENGTH}
-                placeholder="000000"
+                placeholder={"0".repeat(CODE_LENGTH)}
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               />
