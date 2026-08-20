@@ -5,5 +5,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "/voice-lab/",
   plugins: [react()],
-  test: { environment: "jsdom" },
+  // An agent harness can put a worktree — with its own copy of every test — inside the
+  // repo. Without this the suite collects those too and reports failures nobody wrote.
+  test: {
+    environment: "jsdom",
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.claude/**"],
+  },
 });

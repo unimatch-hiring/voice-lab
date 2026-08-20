@@ -4,6 +4,7 @@ dist/
 .wrangler/
 .dev.vars
 .superpowers/
+.claude/
 .env
 .env.local
 .env.*.local
