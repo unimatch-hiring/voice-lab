@@ -30,6 +30,9 @@ export function Waterfall({ bus }: { bus: EventBus }) {
     // A 2D context is not guaranteed: jsdom has none, and a browser can refuse one when
     // too many canvases are live. Asserting it away threw inside the animation frame,
     // where nothing catches it — the run failed with tests green.
+    //
+    // So under test this effect returns here and the loop never runs: assert on
+    // `TurnModel`, which the subscription above feeds either way, not on the canvas.
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
     const model = modelRef.current;

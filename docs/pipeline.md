@@ -23,6 +23,12 @@ change and is bracketed between the transcript and the first audio frame. Mode c
 one stage at a time; `vad`, `stt`, `llm` and `tts` overlap them and are tracked as lanes. Recognition runs while the agent still listens, and synthesis runs
 while it already speaks, so a single "current stage" slot cannot express both.
 
+A lane draws only if the agent is configured to send the event that opens it. `client_events`
+lives on the agent, not in this repo and not in anything the client can override, so `vad`
+and `stt` go permanently blank when `vad_score` and `asr_initiation_metadata` are missing
+from it — with no error anywhere. A dead lane is a question about the agent first and about
+this code second.
+
 ## Turn boundaries
 
 Returning to `listening` ends a turn: metrics are reported and a fresh turn starts. Stage
