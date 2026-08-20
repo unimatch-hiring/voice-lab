@@ -1,27 +1,36 @@
 # voice-lab
 
-Interactive explainer of a voice-agent pipeline. Speak, watch each stage report the
-milliseconds it actually took, and hear the reply back. Client-side SPA; the conversation
-runs on [ElevenLabs Agents](https://elevenlabs.io/docs/agents-platform/overview).
+Interactive explainer of a voice-agent pipeline. We own the presentation; the conversation
+runs on [ElevenLabs Agents](https://elevenlabs.io/docs/agents-platform/overview). What the
+thing is and how the directories divide up: [README](./README.md).
 
-## Commands
+## Done means the checks pass
 
-`npm ci` · `npm run dev` → http://localhost:5173 · `npm run build` · `npm test`
+```sh
+npm ci
+npm test          # vitest, ~2s
+npm run build     # type-check (tsc -b) is part of it
+npm run dev       # http://localhost:5173
+```
 
-Type-check is part of the build (`tsc -b`).
+**Show the output of both before calling anything finished.** Neither is optional and
+neither takes long enough to skip.
 
-## Layout
+## The conversation cannot be run locally without a key
 
-- `src/lib/pipeline/` — the conversation and the stage stream
-- `src/lib/` — transport, config, token storage, the mouth's signal path, fixture recorder
-- `src/scene/` — the scene; reads events only
-- `src/Admin.tsx` — `?admin`: issues the short-lived keys handed to candidates
-- `worker/` — Cloudflare Worker minting short-lived tokens
-- `tools/` — sprite builder
-- `?bench` — dev-only bench for the mouth, on recorded speech
-- `docs/` — everything below
+A live turn needs the deployed Worker and a token pasted into the page — no key, no
+conversation, and nothing about the pipeline can be observed by hand. **So behaviour here is
+proven by tests, not by talking to it.** `agentSession.test.ts` drives the SDK callbacks
+directly; that is the fast way to check anything event-shaped.
 
-## Working here
+`?bench` replays recorded speech through the mouth, and `?record` writes those fixtures.
+
+## What the SDK actually does is documented only by the SDK
+
+We do not own the events. Their shape and their order live in
+`node_modules/@elevenlabs/client/dist` — the `.d.ts` for the shape, the `.js` for the order
+things happen in. **What the docs below say about events is what we observed, not a
+contract**; when the two disagree, the SDK is right and the doc is a bug.
 
 Read the doc for the area you are touching before you touch it.
 
@@ -32,10 +41,26 @@ Read the doc for the area you are touching before you touch it.
 | [docs/mouth.md](docs/mouth.md) | lip sync: amplitude source, invariants, sprites |
 | [docs/deploy.md](docs/deploy.md) | Pages, Worker, secrets |
 
-Non-negotiable, in full in [conventions](docs/conventions.md):
+## Non-negotiable
 
-1. **Ship a test with every behaviour change**, and check it fails when the change is
-   reverted.
-2. **Comment only the non-obvious** — why, not what. One or two lines.
-3. **No new runtime dependencies.**
-4. **High-frequency data lives in refs**, never in state.
+Full reasoning in [conventions](docs/conventions.md). YOU MUST NOT trade any of these for
+a faster green run.
+
+1. **Every behaviour change ships a test, and the test has to fail when the change is
+   reverted.** Check that it does — a test green both ways is not testing the change.
+2. **`src/scene/*` never imports `src/lib/pipeline/*`** — only `types.ts` and `events.ts`.
+   The pipeline does not know it is being drawn. New facts reach the scene as events.
+3. **High-frequency data lives in refs, never in state.** One `requestAnimationFrame` reads
+   the refs and draws; zero React renders per frame.
+   [`render-count.test.tsx`](src/scene/render-count.test.tsx) is the check.
+4. **No new runtime dependencies** beyond React and the ElevenLabs client.
+5. **Comment only the non-obvious** — why, not what, one or two lines.
+
+## Repository etiquette
+
+**A green CI run on `main` deploys — Pages and the Worker both.** So `main` is never pushed
+to directly: branch, open a PR, let CI go green there.
+
+Commit subjects are a plain imperative sentence saying what changed — no `feat:`/`fix:`
+prefixes, no scopes. The body carries the *why*, with numbers when there are numbers.
+`git log` is the house style guide.
