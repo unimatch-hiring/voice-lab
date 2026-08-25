@@ -35,6 +35,7 @@ VITE_VIBE_TOKEN=<token> npm run dev
 
 - `src/lib/pipeline/` — the conversation and the stage stream it emits
 - `src/lib/` — transport, config, token storage, the mouth's signal path
+- `src/lib/persona.ts` — the agent's role, sent as an override when the session opens
 - `src/scene/` — the scene; reads the event stream only and knows nothing about the pipeline
 - `worker/` — Cloudflare Worker minting short-lived tokens (no audio flows through it)
 - `tools/` — sprite builder for the character

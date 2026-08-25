@@ -1,14 +1,18 @@
 import { expect, test, vi } from "vitest";
 import { AgentSession } from "./agentSession";
+import { SYSTEM_PROMPT } from "../persona";
 import { EventBus } from "../events";
 import type { PipelineEvent, TurnMetrics } from "../types";
 
 /** Captures the callbacks the SDK would have received, so they can be fired by hand. */
 const handlers: Record<string, (arg?: unknown) => void> = {};
+/** What the session asked the SDK for, so the handshake itself can be asserted on. */
+let startOptions: Record<string, unknown> = {};
 
 vi.mock("@elevenlabs/client", () => ({
   Conversation: {
     startSession: async (opts: Record<string, unknown>) => {
+      startOptions = opts;
       for (const [key, value] of Object.entries(opts)) {
         if (typeof value === "function") handlers[key] = value as () => void;
       }
@@ -84,4 +88,13 @@ test("a disconnect closes every open lane", async () => {
   const closed = lanes(events, "stage-end");
   expect(closed).toContain("stt");
   expect(closed).toContain("playback");
+});
+
+test("the role is sent with the handshake, not left to the agent's own prompt", async () => {
+  await harness();
+
+  const overrides = startOptions.overrides as
+    | { agent?: { prompt?: { prompt?: string } } }
+    | undefined;
+  expect(overrides?.agent?.prompt?.prompt).toBe(SYSTEM_PROMPT);
 });

@@ -54,3 +54,12 @@ were structural rather than fixable:
 
 Agents solves all three at the source: input and output share one audio context, the
 detector is theirs, playback is theirs.
+
+## Who decides the role
+
+The prompt the agent answers with is not the one configured in the ElevenLabs dashboard:
+`src/lib/persona.ts` overrides it in the handshake (`conversation_initiation_client_data`).
+Two consequences. It applies **once, at session start** — a running conversation keeps the
+role it opened with, so switching roles means a new session. And the agent must permit the
+override: with it disallowed the server closes the connection instead of ignoring the
+field, which reaches the page as a dropped conversation rather than an error about prompts.
