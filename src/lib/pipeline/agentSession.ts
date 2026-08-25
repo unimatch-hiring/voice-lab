@@ -1,6 +1,7 @@
 import { Conversation } from "@elevenlabs/client";
 import type { EventBus } from "../events";
 import { Desmoother } from "../mouthLevel";
+import { SYSTEM_PROMPT } from "../persona";
 import type { Transport } from "../transport";
 import type { StageName, TurnMetrics } from "../types";
 
@@ -99,6 +100,9 @@ export class AgentSession {
 
     this.conversation = await Conversation.startSession({
       conversationToken: token,
+
+      // The role travels with the handshake: the server applies it only at start.
+      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
