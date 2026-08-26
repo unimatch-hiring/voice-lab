@@ -45,3 +45,27 @@ is no live agent to talk to.
 `ALLOWED_ORIGINS` in [`wrangler.toml`](../worker/wrangler.toml) lists who may call the
 Worker; everyone else gets 403. It includes `:5173` for the dev server and `:4173` for
 `vite preview`, because checking the production build locally runs on the latter.
+
+## Branch previews
+
+A branch pushed to this repository is published under
+`https://unimatch-hiring.github.io/voice-lab/pr-preview/<branch>/`, so a change can be
+looked at without merging it. Four live at once; past that the least recently touched are
+dropped, because a merged-and-abandoned branch never fires the `delete` event that would
+clean it up.
+
+The link finds you rather than the other way round: a comment on the pull request (edited
+in place, one per branch), a deployment entry on the branch, and the run's own summary.
+Without the deployment GitHub shows a preview nowhere in its interface — it exists, but
+only the workflow log knows the address.
+
+Two consequences worth knowing.
+
+The site is a branch (`gh-pages`), not an upload. `main`'s build replaces the root and
+leaves `pr-preview/` alone; a preview writes only its own directory. Both take the same
+concurrency group, so they cannot push over each other.
+
+A preview needs a write token, so it only covers branches pushed **here**. A fork's
+branch builds in CI like any other, but nothing publishes it — handing a write token to
+fork code is the hole `pull_request_target` is known for. Someone outside the
+organisation gets a preview by being added to it, or not at all.

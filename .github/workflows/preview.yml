@@ -1,0 +1,198 @@
+name: Branch preview
+
+# A branch gets its own URL under the published site, so a change can be looked at
+# without merging it. Triggered by the push, not by a pull request: a fork has no write
+# token, and handing one to fork code is the mistake `pull_request_target` is famous for.
+# So previews cover branches pushed to this repository — ours, and a collaborator's.
+on:
+  push:
+    branches-ignore: [main, gh-pages]
+  delete:
+
+permissions:
+  contents: read
+
+# The main deploy writes the same branch.
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+# How many previews may live at once. The oldest are dropped past this, because nothing
+# else reclaims them: a branch deleted through the API fires `delete`, but a branch that
+# is merged and left behind fires nothing.
+env:
+  KEEP: 4
+
+jobs:
+  build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      slug: ${{ steps.slug.outputs.value }}
+    steps:
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A branch name is a path segment here, so anything that is not a plain word has
+      # to go — a slash would silently nest the preview one level deeper.
+      - id: slug
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          slug=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+          [ -n "$slug" ] || slug="branch"
+          echo "value=$slug" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build
+        env:
+          VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
+          # The preview is served one level deeper than the site, so its asset paths
+          # differ from main's build.
+          BASE_PATH: /voice-lab/pr-preview/${{ steps.slug.outputs.value }}/
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preview
+          path: dist
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Only to leave the link on the pull request, if the branch has one.
+      pull-requests: write
+    # Turns the preview into a deployment, which is what puts a link on the branch and
+    # in the repository sidebar instead of only in this run's log.
+    environment:
+      name: preview
+      url: https://unimatch-hiring.github.io/voice-lab/pr-preview/${{ needs.build.outputs.slug }}/
+    steps:
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: site
+          # Kept on purpose: this checkout is the one that pushes.
+          persist-credentials: true
+        # The branch does not exist until something publishes, and a preview may well be
+        # the first thing to.
+        continue-on-error: true
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: preview
+          path: dist
+
+      - name: Publish the preview
+        env:
+          SLUG: ${{ needs.build.outputs.slug }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -d site/.git ]; then
+            rm -rf site
+            mkdir site
+            git -C site init -q -b gh-pages
+            git -C site remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+            touch site/.nojekyll
+          fi
+
+          cd site
+          rm -rf "pr-preview/$SLUG"
+          mkdir -p "pr-preview/$SLUG"
+          cp -R ../dist/. "pr-preview/$SLUG/"
+
+          # Sorted by the commit that last touched each one, so the ones still being
+          # worked on stay and the forgotten ones go.
+          if [ -d pr-preview ]; then
+            for dir in pr-preview/*/; do
+              [ -d "$dir" ] || continue
+              printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$dir" 2>/dev/null || echo 0)" "$dir"
+            done | sort -rn | tail -n "+$((KEEP + 1))" | cut -f2 | while read -r old; do
+              echo "dropping $old"
+              rm -rf "$old"
+            done
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --quiet --cached && { echo "preview unchanged"; exit 0; }
+          git commit -q -m "Preview $SLUG at ${GITHUB_SHA:0:7}"
+          git push -q origin HEAD:gh-pages
+          echo "### Preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://unimatch-hiring.github.io/voice-lab/pr-preview/$SLUG/" >> "$GITHUB_STEP_SUMMARY"
+
+      # A push knows its branch, not its pull request, so the number is looked up. One
+      # comment per branch, edited in place: a new one on every push would bury the
+      # review under links to the same page.
+      - name: Leave the link on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLUG: ${{ needs.build.outputs.slug }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/$REPO/pulls?head=$OWNER:$BRANCH&state=open" --jq '.[0].number // empty')
+          [ -n "$pr" ] || { echo "no open pull request for $BRANCH"; exit 0; }
+
+          marker='<!-- branch-preview -->'
+          body=$(printf '%s\n\nPreview of `%s`: https://unimatch-hiring.github.io/voice-lab/pr-preview/%s/\n\nBuilt from %s. Paste a key on the page to talk to it — the preview is served from the same origin as the site, so the token minter answers it.' \
+            "$marker" "$BRANCH" "$SLUG" "${GITHUB_SHA:0:7}")
+
+          existing=$(gh api "repos/$REPO/issues/$pr/comments" --jq "map(select(.body | startswith(\"$marker\")))[0].id // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" --silent
+          else
+            gh api -X POST "repos/$REPO/issues/$pr/comments" -f body="$body" --silent
+          fi
+
+  remove:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: site
+          # Kept on purpose: this checkout is the one that pushes.
+          persist-credentials: true
+        continue-on-error: true
+
+      # No project code runs in this job: the branch it belongs to is gone. It only
+      # deletes a directory, which is why a deleted branch is allowed to trigger it.
+      - name: Drop the preview
+        env:
+          REF_NAME: ${{ github.event.ref }}
+        run: |
+          set -euo pipefail
+          slug=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+          [ -d site/.git ] || { echo "nothing published yet"; exit 0; }
+          cd site
+          [ -d "pr-preview/$slug" ] || { echo "no preview for $slug"; exit 0; }
+          rm -rf "pr-preview/$slug"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Drop preview $slug"
+          git push -q origin HEAD:gh-pages
