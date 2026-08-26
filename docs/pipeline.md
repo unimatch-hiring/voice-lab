@@ -17,6 +17,11 @@ translates SDK events into the stage stream the scene draws.
 | `llm` | `onMessage` with `source: "user"` | first `onAudio` |
 | `tts` | first `onAudio` | mode leaving `speaking` |
 | `playback` | `onModeChange` → `speaking` | next mode change |
+| `gate` | the validator starting on a user transcript | its verdict, or its deadline |
+| `recall` | the searcher's tier 2 | its answer, or its deadline |
+| `archive` | the archiver, on a turn boundary | its summary, or its deadline |
+
+The last three run beside a reply ElevenLabs has already begun and cannot pre-empt one: [layers.md](layers.md).
 
 `Mode` has only two values — `speaking` and `listening` — so `llm` cannot come from a mode
 change and is bracketed between the transcript and the first audio frame. Mode changes drive

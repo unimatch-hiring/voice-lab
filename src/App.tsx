@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EventBus } from "./lib/events";
 import { AgentSession } from "./lib/pipeline/agentSession";
+import { LayerStack } from "./lib/pipeline/layers/orchestrator";
+import { liveLayerLlm } from "./lib/pipeline/layers/llm";
+import { personaFor } from "./lib/persona";
 import { createTransport } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
@@ -75,9 +78,21 @@ export function App() {
       workerUrl: config.workerUrl,
       vibeToken: config.vibeToken,
     });
-    return new AgentSession({
+    const persona = personaFor(new URLSearchParams(location.search).get("role"));
+    // The stack pushes context through the session, and the session drives the stack, so
+    // one of the two has to be named before it exists. The closure resolves at call time.
+    let live: AgentSession;
+    const layers = new LayerStack({
+      bus,
+      llm: liveLayerLlm({ transport }),
+      persona,
+      pushContext: (text) => live.pushContext(text),
+    });
+    live = new AgentSession({
       bus,
       transport,
+      persona,
+      layers,
       onTurn: (turn) => {
         setMetrics(turn);
         recorder.addTurn(turn);
@@ -96,6 +111,7 @@ export function App() {
         setEndedBy(reason);
       },
     });
+    return live;
   }, [bus, config, recorder]);
 
   // Stable across renders on purpose. The mouth's animation loop depends on this

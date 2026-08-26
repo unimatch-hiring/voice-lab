@@ -33,6 +33,9 @@
   --stage-llm: #7209b7;
   --stage-tts: #b5179e;
   --stage-playback: #f72585;
+  --stage-gate: #f9c74f;
+  --stage-recall: #f8961e;
+  --stage-archive: #43aa8b;
 
   /* The field sits against the card, not the page, so it needs its own step away
      from --panel in each theme. */

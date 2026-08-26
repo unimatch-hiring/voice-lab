@@ -1,4 +1,4 @@
-import { STAGE_ORDER, type StageName, type TurnMetrics } from "../lib/types";
+import { OFF_PATH, STAGE_ORDER, type StageName, type TurnMetrics } from "../lib/types";
 
 /**
  * What the finished turn actually cost, per stage.
@@ -20,7 +20,12 @@ export function StageBreakdown({ metrics }: { metrics: TurnMetrics | null }) {
     );
   }
 
-  const measured = STAGE_ORDER.filter((s) => metrics.stages[s] !== undefined);
+  const measured = STAGE_ORDER.filter(
+    (s) => metrics.stages[s] !== undefined && !OFF_PATH.includes(s),
+  );
+  // The layered lanes run beside a reply that has already started, so adding them to the
+  // total would report a four-second archiver as four seconds the speaker waited.
+  const beside = OFF_PATH.filter((s) => metrics.stages[s] !== undefined);
   const total = measured.reduce((sum, s) => sum + (metrics.stages[s] ?? 0), 0);
   const slowest = measured.reduce<StageName | null>(
     (worst, s) =>
@@ -60,6 +65,21 @@ export function StageBreakdown({ metrics }: { metrics: TurnMetrics | null }) {
           );
         })}
       </ol>
+
+      {beside.length > 0 && (
+        <ol className="breakdown-rows breakdown-beside">
+          {beside.map((stage) => (
+            <li key={stage}>
+              <span className="breakdown-name">{stage}</span>
+              <span className="breakdown-track" />
+              <span className="breakdown-ms readout">
+                {Math.round(metrics.stages[stage] ?? 0)}
+              </span>
+              <span className="breakdown-share">while the reply plays</span>
+            </li>
+          ))}
+        </ol>
+      )}
 
       <p className="breakdown-foot">
         {slowest} dominated this turn. {metrics.llmTokens} tokens generated,{" "}
