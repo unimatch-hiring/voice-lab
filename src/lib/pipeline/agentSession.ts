@@ -1,7 +1,8 @@
 import { Conversation } from "@elevenlabs/client";
 import type { EventBus } from "../events";
 import { Desmoother } from "../mouthLevel";
-import { SYSTEM_PROMPT } from "../persona";
+import { personaFor, type Persona } from "../persona";
+import type { LayerStack } from "./layers/orchestrator";
 import type { Transport } from "../transport";
 import type { StageName, TurnMetrics } from "../types";
 
@@ -15,6 +16,10 @@ export interface AgentSessionDeps {
    * decided it was done, or the connection failed.
    */
   onEnded: (reason: "user" | "agent" | "error", message?: string) => void;
+  /** The role this session opens with. It applies once, at start. */
+  persona?: Persona;
+  /** The side layers, or null to run the instrument without them. */
+  layers?: LayerStack | null;
 }
 
 /**
@@ -102,7 +107,14 @@ export class AgentSession {
       conversationToken: token,
 
       // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      overrides: { agent: { prompt: { prompt: (this.deps.persona ?? personaFor(null)).systemPrompt } } },
+
+      // E, when the agent is configured to ask for it. The SDK awaits this handler, so it
+      // is the one path on which recall happens before the reply rather than beside it.
+      clientTools: {
+        recall_from_conversation: async ({ query }: { query: string }) =>
+          (await this.deps.layers?.recall(query)) ?? "",
+      },
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
@@ -141,6 +153,8 @@ export class AgentSession {
             type: "stt-result",
             result: { text: message, words: [] },
           });
+          // Never awaited: no layer may delay or block a reply that has already started.
+          void this.deps.layers?.onUserUtterance(message);
           return;
         }
 
@@ -152,6 +166,7 @@ export class AgentSession {
           return;
         }
         this.streamedReply = "";
+        this.deps.layers?.onAgentReply(message);
         this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
       },
 
@@ -197,6 +212,11 @@ export class AgentSession {
     this.running = true;
   }
 
+  /** Adds context to the live conversation without provoking a turn. */
+  pushContext(text: string): void {
+    this.conversation?.sendContextualUpdate(text);
+  }
+
   /** Lanes overlap the mode-driven stage, so they cannot share its single slot. */
   private openLane(stage: StageName, at: number): void {
     if (this.lanes.has(stage)) return;
@@ -222,8 +242,12 @@ export class AgentSession {
         (this.metrics.stages[this.stage] ?? 0) + (now - this.stageAt);
 
       if (next === "capture") {
+        this.deps.bus.emit({ type: "turn-end", at: now, metrics: this.metrics });
         this.deps.onTurn(this.metrics);
         this.resetTurn();
+        this.deps.bus.emit({ type: "turn-start", at: now });
+        // C runs here, while the next capture is already open.
+        void this.deps.layers?.onTurnEnd();
       }
     }
 
@@ -256,6 +280,7 @@ export class AgentSession {
     this.closeAllLanes(performance.now());
     const conversation = this.conversation;
     this.conversation = null;
+    this.deps.layers?.close();
     await conversation?.endSession().catch(() => undefined);
   }
 }

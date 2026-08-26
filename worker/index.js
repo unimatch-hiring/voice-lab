@@ -202,6 +202,18 @@ export default {
       return json({ token: body.token, agentId: env.AGENT_ID });
     }
 
+    // The same agent over WebSocket, for the text-only side layers. A conversation token
+    // authenticates WebRTC only, so those sessions need this instead.
+    if (path === "/agent/signed-url") {
+      const r = await fetch(
+        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${env.AGENT_ID}`,
+        { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } },
+      );
+      if (!r.ok) return json({ error: "upstream failed", status: r.status }, 502);
+      const body = await r.json();
+      return json({ signedUrl: body.signed_url });
+    }
+
     return json({ error: "not found" }, 404);
   },
 };

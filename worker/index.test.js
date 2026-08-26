@@ -415,3 +415,36 @@ describe("signing in by code", () => {
     expect((await worker.fetch(req("/admin/keys", { method: "GET", headers }), e)).status).toBe(401);
   });
 });
+
+describe("minting a signed url for the side layers", () => {
+  it("returns the url and never the api key", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ signed_url: "wss://api.elevenlabs.io/x?token=abc" }), {
+        status: 200,
+      }),
+    );
+
+    const r = await worker.fetch(
+      req("/agent/signed-url", { headers: { "x-vibe-token": "permanent" } }),
+      env(),
+    );
+
+    expect(r.status).toBe(200);
+    expect((await r.json()).signedUrl).toBe("wss://api.elevenlabs.io/x?token=abc");
+    expect(JSON.stringify(spy.mock.calls[0])).toContain("get-signed-url");
+  });
+
+  it("refuses a caller without a token", async () => {
+    const r = await worker.fetch(req("/agent/signed-url"), env());
+    expect(r.status).toBe(401);
+  });
+
+  it("reports an upstream failure rather than passing it off as a url", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 500 }));
+    const r = await worker.fetch(
+      req("/agent/signed-url", { headers: { "x-vibe-token": "permanent" } }),
+      env(),
+    );
+    expect(r.status).toBe(502);
+  });
+});

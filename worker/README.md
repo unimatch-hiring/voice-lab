@@ -1,6 +1,6 @@
 # voice-lab token-minter
 
-Hands single-use ElevenLabs tokens to the client and proxies LLM requests (text).
+Hands single-use ElevenLabs tokens to the client and mints signed WebSocket URLs for the text-only side layers.
 No audio flows through the Worker — just a short JSON with a token.
 
 ## Deploy

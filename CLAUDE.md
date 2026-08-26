@@ -38,6 +38,7 @@ Read the doc for the area you are touching before you touch it.
 |---|---|
 | [docs/conventions.md](docs/conventions.md) | how we write code here — **read first** |
 | [docs/pipeline.md](docs/pipeline.md) | stage mapping, turn boundaries, why not our own pipeline |
+| [docs/layers.md](docs/layers.md) | the layered loop: what runs beside a reply, and why none of it can gate one |
 | [docs/mouth.md](docs/mouth.md) | lip sync: amplitude source, invariants, sprites |
 | [docs/deploy.md](docs/deploy.md) | Pages, Worker, secrets |
 

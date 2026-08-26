@@ -15,6 +15,9 @@ const COLOR: Record<StageName, string> = {
   llm: "#7209b7",
   tts: "#b5179e",
   playback: "#f72585",
+  gate: "#f9c74f",
+  recall: "#f8961e",
+  archive: "#43aa8b",
 };
 
 export function Waterfall({ bus }: { bus: EventBus }) {
