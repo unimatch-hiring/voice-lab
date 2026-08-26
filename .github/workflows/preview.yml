@@ -72,6 +72,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Only to leave the link on the pull request, if the branch has one.
+      pull-requests: write
+    # Turns the preview into a deployment, which is what puts a link on the branch and
+    # in the repository sidebar instead of only in this run's log.
+    environment:
+      name: preview
+      url: https://unimatch-hiring.github.io/voice-lab/pr-preview/${{ needs.build.outputs.slug }}/
     steps:
       - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2
         with:
@@ -131,6 +138,32 @@ jobs:
           git push -q origin HEAD:gh-pages
           echo "### Preview" >> "$GITHUB_STEP_SUMMARY"
           echo "https://unimatch-hiring.github.io/voice-lab/pr-preview/$SLUG/" >> "$GITHUB_STEP_SUMMARY"
+
+      # A push knows its branch, not its pull request, so the number is looked up. One
+      # comment per branch, edited in place: a new one on every push would bury the
+      # review under links to the same page.
+      - name: Leave the link on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLUG: ${{ needs.build.outputs.slug }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/$REPO/pulls?head=$OWNER:$BRANCH&state=open" --jq '.[0].number // empty')
+          [ -n "$pr" ] || { echo "no open pull request for $BRANCH"; exit 0; }
+
+          marker='<!-- branch-preview -->'
+          body=$(printf '%s\n\nPreview of `%s`: https://unimatch-hiring.github.io/voice-lab/pr-preview/%s/\n\nBuilt from %s. Paste a key on the page to talk to it — the preview is served from the same origin as the site, so the token minter answers it.' \
+            "$marker" "$BRANCH" "$SLUG" "${GITHUB_SHA:0:7}")
+
+          existing=$(gh api "repos/$REPO/issues/$pr/comments" --jq "map(select(.body | startswith(\"$marker\")))[0].id // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" --silent
+          else
+            gh api -X POST "repos/$REPO/issues/$pr/comments" -f body="$body" --silent
+          fi
 
   remove:
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'

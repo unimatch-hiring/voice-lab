@@ -54,6 +54,11 @@ looked at without merging it. Four live at once; past that the least recently to
 dropped, because a merged-and-abandoned branch never fires the `delete` event that would
 clean it up.
 
+The link finds you rather than the other way round: a comment on the pull request (edited
+in place, one per branch), a deployment entry on the branch, and the run's own summary.
+Without the deployment GitHub shows a preview nowhere in its interface — it exists, but
+only the workflow log knows the address.
+
 Two consequences worth knowing.
 
 The site is a branch (`gh-pages`), not an upload. `main`'s build replaces the root and

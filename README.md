@@ -31,6 +31,21 @@ a rebuild. For local runs a build-time variable also works:
 VITE_VIBE_TOKEN=<token> npm run dev
 ```
 
+## Looking at a branch
+
+Push it. Every branch but `main` is published under its own path, so a change can be
+looked at — and talked to — without merging:
+
+```
+git push -u origin my-branch
+→ https://unimatch-hiring.github.io/voice-lab/pr-preview/my-branch/
+```
+
+The link arrives on its own: as a comment on the pull request, as a deployment on the
+branch, and in the run's summary. Four previews live at once, and deleting the branch
+removes its own. Details, including why previews do not cover forks:
+[docs/deploy.md](docs/deploy.md).
+
 ## How it fits together
 
 - `src/lib/pipeline/` — the conversation and the stage stream it emits
