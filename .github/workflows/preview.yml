@@ -30,7 +30,7 @@ jobs:
     outputs:
       slug: ${{ steps.slug.outputs.value }}
     steps:
-      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
@@ -80,7 +80,7 @@ jobs:
       name: preview
       url: https://unimatch-hiring.github.io/voice-lab/pr-preview/${{ needs.build.outputs.slug }}/
     steps:
-      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 

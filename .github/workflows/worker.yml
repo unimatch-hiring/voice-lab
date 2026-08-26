@@ -35,7 +35,7 @@ jobs:
       # token off the machine shows up. Audit until the reports have named the real
       # endpoints across a few deploys, then switch to `block` with them listed —
       # blocking against a guessed list breaks the deploy and teaches nobody anything.
-      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
