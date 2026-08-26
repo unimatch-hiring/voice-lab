@@ -12,9 +12,10 @@ on:
 permissions:
   contents: read
 
+# Branch previews write to the same branch, so the two cannot push at once.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: gh-pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -60,20 +61,65 @@ jobs:
           # by its origin list and the token, not by its address being unknown.
           VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
 
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
+          name: site
           path: dist
+          retention-days: 1
 
-  deploy:
+  publish:
     needs: build
     runs-on: ubuntu-latest
-    # Only the job that publishes needs to write Pages or mint an identity token.
+    # The only job with a credential that writes. It never runs project code: it moves
+    # files the build already produced.
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: site
+          # Kept on purpose: this checkout is the one that pushes.
+          persist-credentials: true
+        continue-on-error: true
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: site
+          path: dist
+
+      - name: Publish to gh-pages
+        env:
+          BRANCH: gh-pages
+        run: |
+          set -euo pipefail
+
+          # First deploy after the switch to a published branch: there is nothing to
+          # check out, so start the branch here.
+          if [ ! -d site/.git ]; then
+            rm -rf site
+            mkdir site
+            git -C site init -q -b "$BRANCH"
+            git -C site remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          fi
+
+          # Everything in the root belongs to main's build and is replaced wholesale.
+          # `pr-preview/` does not: branch previews live there and outlive any one deploy.
+          find site -mindepth 1 -maxdepth 1 ! -name .git ! -name pr-preview -exec rm -rf {} +
+          cp -R dist/. site/
+          # Pages runs Jekyll otherwise, which drops files whose names start with an
+          # underscore — Vite emits none today, but a plugin that does would be a silent
+          # 404 rather than a build error.
+          touch site/.nojekyll
+
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --quiet --cached && { echo "site unchanged"; exit 0; }
+          git commit -q -m "Publish ${GITHUB_SHA:0:7}"
+          git push -q origin "HEAD:$BRANCH"
