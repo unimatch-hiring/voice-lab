@@ -83,6 +83,9 @@ jobs:
           path: site
           # Kept on purpose: this checkout is the one that pushes.
           persist-credentials: true
+        # The branch does not exist until something publishes, and a preview may well be
+        # the first thing to.
+        continue-on-error: true
 
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
@@ -94,6 +97,15 @@ jobs:
           SLUG: ${{ needs.build.outputs.slug }}
         run: |
           set -euo pipefail
+
+          if [ ! -d site/.git ]; then
+            rm -rf site
+            mkdir site
+            git -C site init -q -b gh-pages
+            git -C site remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+            touch site/.nojekyll
+          fi
+
           cd site
           rm -rf "pr-preview/$SLUG"
           mkdir -p "pr-preview/$SLUG"
@@ -132,6 +144,7 @@ jobs:
           path: site
           # Kept on purpose: this checkout is the one that pushes.
           persist-credentials: true
+        continue-on-error: true
 
       # No project code runs in this job: the branch it belongs to is gone. It only
       # deletes a directory, which is why a deleted branch is allowed to trigger it.
@@ -141,6 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           slug=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+          [ -d site/.git ] || { echo "nothing published yet"; exit 0; }
           cd site
           [ -d "pr-preview/$slug" ] || { echo "no preview for $slug"; exit 0; }
           rm -rf "pr-preview/$slug"
