@@ -1,6 +1,6 @@
 # voice-lab token-minter
 
-Hands single-use ElevenLabs tokens to the client and proxies LLM requests (text).
+Hands single-use ElevenLabs tokens and Deepgram grants to the client.
 No audio flows through the Worker — just a short JSON with a token.
 
 ## Deploy
@@ -10,11 +10,10 @@ There are no zones on the account, so the address will be `*.workers.dev`.
 ```sh
 cd worker
 wrangler secret put ELEVENLABS_API_KEY
-wrangler secret put VIBE_TOKEN           # permanent client secret, ours
 wrangler deploy
 ```
 
-Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
+Never write secrets to files.
 
 Merging a change under `worker/` to `main` deploys it: after CI passes,
 [`worker.yml`](../.github/workflows/worker.yml) (**Deploy Worker**) runs
@@ -29,9 +28,9 @@ shipped by hand with `wrangler deploy`.
 
 ## Interview keys
 
-`VIBE_TOKEN` is ours and permanent. Candidates get their own keys, issued from the admin
-page (`?admin` on the frontend) and stored in the `KEYS` namespace under a TTL, so they
-expire on their own and revoking one does not disturb anybody else's.
+Every caller, us included, uses a key issued from the admin page (`?admin` on the frontend)
+and stored in the `KEYS` namespace under a TTL, so it expires on its own and revoking one
+does not disturb anybody else's. There is no permanent token.
 
 Live since 13.08.2026: the namespace is bound in `wrangler.toml`.
 
@@ -45,9 +44,13 @@ Live since 13.08.2026: the namespace is bound in `wrangler.toml`.
 All three need `x-admin-session` — a session from the sign-in below. A key handed to a
 candidate never opens them; otherwise the candidate could issue more.
 
-The Worker accepts either token for minting: `VIBE_TOKEN` first, then a lookup in KV.
-With no `KEYS` namespace bound the admin endpoints answer 404 and `VIBE_TOKEN` keeps
-working alone — a deployment that never wanted this feature is unaffected.
+With Slack down nobody can sign in to issue one; a key can still be written straight into
+KV by someone holding Cloudflare credentials, with an explicit lifetime:
+
+```sh
+wrangler kv key put --binding KEYS --remote --ttl 14400 "key:vibe_<random>" \
+  '{"label":"ops","engine":"elevenlabs","issuedAt":<ms>,"expiresAt":<ms + 4h>}'
+```
 
 ## Signing in
 
@@ -67,11 +70,16 @@ The allowlist lives in KV as `admin:<email>` → their Slack user ID, which is w
 code is sent; the address only names them. Adding somebody is a write, not a deploy, and
 removing them ends their live sessions at once — every request re-checks the list.
 
-The code is eight digits, single use, dead after ten minutes or five wrong tries. Eight
-rather than the customary six because the try counter lives in KV, which is not atomic
-under parallel guesses — the reasoning is in `signin.js`. Neither the code nor the session
+The code is eight digits, single use, dead after ten minutes or five wrong tries. One
+address gets at most three codes per 15 minutes and ten per day. The code and its tries
+live in a Durable Object per address (`AddressGuard`, `guard.js`), which counts atomically,
+so twenty parallel guesses spend twenty tries, not one. Neither the code nor the session
 is stored in the clear, and both answers to `/admin/signin` are identical, DM included:
 it is sent after the response so the two do not differ by a stopwatch either.
+
+More than ten wrong codes, or more than ten code requests, for one address within ten
+minutes DMs every admin on the list, at most once per ten minutes per address. Every
+failed guess is also a `console.warn` (`signin verify failed`) in `wrangler tail`.
 
 `ADMIN_TOKEN` survives for one job — seeding the allowlist and getting back in if Slack is
 down. It cannot mint interview keys. Value in Vault, `secret/t-ai/shared/voice-poc`, field
@@ -99,12 +107,29 @@ conversation, so a switch applies to the next one.
 
 | | |
 |---|---|
-| `POST /engine` | `{engine}` for the caller's key; `VIBE_TOKEN` and older keys answer `elevenlabs` |
+| `POST /engine` | `{engine}` for the caller's key; keys issued before engines existed answer `elevenlabs` |
 | `POST /deepgram-token` | `{token}` — a 30-second grant from `POST /v1/auth/grant` |
+
+A key mints only for its own engine: `/agent/token` answers `403` to a Deepgram key and
+`/deepgram-token` to an ElevenLabs one.
 
 `DEEPGRAM_API_KEY` is a Worker secret. The grant endpoint needs a key with at least the
 Member role; a Default key gets `403` and the page reports the start as failed. The LLM and
 the voice are Deepgram-managed, so no other provider key is involved.
+
+## Rate limits
+
+Workers Rate Limiting bindings in `wrangler.toml`, all per minute. They count per
+Cloudflare location and are approximate; the exact counting is `AddressGuard`'s.
+
+| binding | key | limit |
+|---|---|---|
+| `SIGNIN_LIMIT` / `SIGNIN_IP_LIMIT` | address / caller IP | 5 / 10 |
+| `VERIFY_LIMIT` / `VERIFY_IP_LIMIT` | address / caller IP | 10 / 20 |
+| `TOKEN_KEY_LIMIT` | hash of the key; minting and `/engine` counted apart | 6 |
+| `TOKEN_IP_LIMIT` | caller IP, checked before the key is looked up | 30 |
+
+Over the limit is `429`.
 
 ## Local development
 
@@ -113,10 +138,9 @@ the voice are Deepgram-managed, so no other provider key is involved.
 ```
 ELEVENLABS_API_KEY=...
 DEEPGRAM_API_KEY=...
-VIBE_TOKEN=dev
 ```
 
-A key on the Deepgram engine for local runs goes into the local KV:
+A key for local runs goes into the local KV:
 `wrangler kv key put --binding KEYS --local "key:vibe_dev" '{"engine":"deepgram","expiresAt":<ms>}'`.
 
 `wrangler dev` → http://localhost:8787

@@ -23,14 +23,14 @@ Needs two repository secrets:
   zones, no billing.
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `VIBE_TOKEN`, `ADMIN_TOKEN`) are bound to the
+The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `ADMIN_TOKEN`) are bound to the
 Worker with `wrangler secret put` and are untouched by a deploy, so they never pass through
 CI. `AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
 
 ## Interview keys
 
-Candidates get their own short-lived keys instead of our permanent `VIBE_TOKEN`, issued
-from `?admin` and kept in the `KEYS` KV namespace. Setup and the endpoints:
+Every caller gets a short-lived key, issued from `?admin` and kept in the `KEYS` KV
+namespace; there is no permanent one. Setup and the endpoints:
 [`worker/README.md`](../worker/README.md).
 
 ## Recording fixtures

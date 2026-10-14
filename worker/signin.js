@@ -1,3 +1,5 @@
+import { guard } from "./guard.js";
+
 /**
  * Admin sign-in by a code sent over Slack.
  *
@@ -10,36 +12,30 @@
  * your head.
  */
 
-/** Ten minutes is enough to walk to Slack and back. */
-const CODE_TTL_SECONDS = 600;
 /**
- * Eight, not the customary six: the try cap below is a KV read-modify-write, which is not
- * atomic, so parallel guesses each get a free try and the guess space has to carry this
- * on its own. A million is reachable by script; a hundred million is not.
+ * Eight digits, not the customary six: the try cap is per code, so the guess space is what
+ * keeps a script that requests code after code from getting anywhere.
  */
 const CODE_DIGITS = 8;
 /** A session covers a shift: an interview runs 80 minutes, and they come back to back. */
 const SESSION_TTL_SECONDS = 12 * 3600;
-/** How many codes one address may ask for per window. */
-const CODE_LIMIT = 3;
-const CODE_LIMIT_WINDOW = 900;
-/** The code burns after this many wrong guesses. */
-const MAX_TRIES = 5;
 
 const normalise = (email) => String(email ?? "").trim().toLowerCase();
+
+export const clientIp = (req) => req.headers.get("cf-connecting-ip") ?? "unknown";
 
 /**
  * Cloudflare's rate limiter, when one is bound. It counts per location and is permissive
  * by design, so it raises the price of guessing rather than capping it. No binding means
  * `wrangler dev` and the tests.
  */
-async function withinLimit(limiter, key) {
+export async function withinLimit(limiter, key) {
   if (!limiter) return true;
   const { success } = await limiter.limit({ key });
   return success;
 }
 
-async function sha256(text) {
+export async function sha256(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -88,6 +84,19 @@ async function slackDm(env, userId, text) {
   return sent.ok === true;
 }
 
+/** Tells every admin on the list, through the same DM channel the codes use. */
+async function alertAdmins(env, text) {
+  const { keys } = await env.KEYS.list({ prefix: "admin:" });
+  const ids = await Promise.all(keys.map(({ name }) => env.KEYS.get(name)));
+  await Promise.all(ids.filter(Boolean).map((id) => slackDm(env, id, text)));
+}
+
+/** Runs after the response when the runtime allows, so the caller never waits on Slack. */
+async function later(ctx, work) {
+  if (ctx?.waitUntil) ctx.waitUntil(work);
+  else await work;
+}
+
 /**
  * Issues a code if the address is on the list.
  *
@@ -100,6 +109,9 @@ export async function requestCode(req, env, json, ctx) {
   const body = await req.json().catch(() => ({}));
   const email = normalise(body.email);
   const same = () => json({ ok: true });
+  const ip = clientIp(req);
+  // Independent of the address, so answering it early discloses nothing about the list.
+  if (!(await withinLimit(env.SIGNIN_IP_LIMIT, ip))) return json({ error: "too many requests" }, 429);
   if (!email.includes("@")) return same();
 
   // Nothing is read before replying, not even the allowlist. A KV hit and a KV miss cost
@@ -111,19 +123,16 @@ export async function requestCode(req, env, json, ctx) {
     const slackId = await env.KEYS.get(`admin:${email}`);
     if (!slackId) return;
 
-    const rateKey = `otprate:${email}`;
-    const used = Number((await env.KEYS.get(rateKey)) ?? 0);
-    if (used >= CODE_LIMIT) return;
-    await env.KEYS.put(rateKey, String(used + 1), { expirationTtl: CODE_LIMIT_WINDOW });
-
     const code = digits(CODE_DIGITS);
-    // Store a hash: reading the KV store must not be enough to sign in.
-    await env.KEYS.put(
-      `otp:${email}`,
-      JSON.stringify({ hash: await sha256(`${email}:${code}`), tries: 0 }),
-      { expirationTtl: CODE_TTL_SECONDS },
-    );
-    await slackDm(env, slackId, `voice-lab admin code: *${code}*\nGood for 10 minutes.`);
+    // The guard keeps a hash: reading its storage must not be enough to sign in.
+    const result = await guard(env, email, "issue", { hash: await sha256(`${email}:${code}`) });
+    if (!result.issued) console.warn("signin code refused", { email, ip, reason: result.reason });
+    if (result.alert) {
+      await alertAdmins(env, `voice-lab: ${result.alert} sign-in code requests for ${email} in 10 minutes, latest from ${ip}.`);
+    }
+    if (result.issued) {
+      await slackDm(env, slackId, `voice-lab admin code: *${code}*\nGood for 10 minutes.`);
+    }
   };
 
   if (ctx?.waitUntil) ctx.waitUntil(issue());
@@ -132,32 +141,26 @@ export async function requestCode(req, env, json, ctx) {
 }
 
 /** Trades a correct code for a session. The code is single-use. */
-export async function verifyCode(req, env, json) {
+export async function verifyCode(req, env, json, ctx) {
   const body = await req.json().catch(() => ({}));
   const email = normalise(body.email);
   const code = String(body.code ?? "").trim();
+  const ip = clientIp(req);
 
-  if (!(await withinLimit(env.VERIFY_LIMIT, email))) {
+  if (!(await withinLimit(env.VERIFY_IP_LIMIT, ip)) || !(await withinLimit(env.VERIFY_LIMIT, email))) {
+    console.warn("signin verify limited", { email, ip });
     return json({ error: "too many attempts" }, 429);
   }
 
-  const raw = await env.KEYS.get(`otp:${email}`);
-  if (!raw) return json({ error: "code expired" }, 401);
-  const state = JSON.parse(raw);
-
-  if (state.tries >= MAX_TRIES) {
-    await env.KEYS.delete(`otp:${email}`);
-    return json({ error: "code expired" }, 401);
+  const result = await guard(env, email, "verify", { hash: await sha256(`${email}:${code}`) });
+  if (!result.ok) {
+    console.warn("signin verify failed", { email, ip, reason: result.reason });
+    if (result.alert) {
+      await later(ctx, alertAdmins(env, `voice-lab: ${result.alert} wrong sign-in codes for ${email} in 10 minutes, latest from ${ip}.`));
+    }
+    return json({ error: result.reason === "wrong" ? "wrong code" : "code expired" }, 401);
   }
 
-  if ((await sha256(`${email}:${code}`)) !== state.hash) {
-    await env.KEYS.put(`otp:${email}`, JSON.stringify({ ...state, tries: state.tries + 1 }), {
-      expirationTtl: CODE_TTL_SECONDS,
-    });
-    return json({ error: "wrong code" }, 401);
-  }
-
-  await env.KEYS.delete(`otp:${email}`);
   const session = randomToken();
   // Hashed for the same reason the code is: KV contents must not be a way in.
   await env.KEYS.put(`sess:${await sha256(session)}`, email, {

@@ -1,6 +1,9 @@
 import {
   requestCode, verifyCode, sessionEmail, listPeople, addPerson, removePerson,
+  clientIp, withinLimit, sha256,
 } from "./signin.js";
+
+export { AddressGuard } from "./guard.js";
 
 /**
  * ALLOWED_ORIGINS is a comma-separated list in an environment variable, e.g.:
@@ -60,21 +63,19 @@ const DEFAULT_ENGINE = "elevenlabs";
 const engineOf = (value) => (ENGINES.includes(value) ? value : DEFAULT_ENGINE);
 
 /**
- * Who may mint session tokens, and on which engine: the permanent VIBE_TOKEN, or an
- * interview key still alive in KV. The permanent one is checked first so the
- * deployed site and local dev keep working with no KV namespace bound at all.
- * Returns null for a stranger.
+ * The engine an interview key alive in KV is set to, or null for a stranger. Every key
+ * carries an expiry; there is no permanent one.
  */
-async function caller(req, env) {
-  const token = req.headers.get("x-vibe-token") ?? "";
-  if (!token) return null;
-  if (env.VIBE_TOKEN && secretEquals(token, env.VIBE_TOKEN)) return { engine: DEFAULT_ENGINE };
-  if (!env.KEYS) return null;
+async function caller(token, env) {
+  if (!token || !env.KEYS) return null;
   const raw = await env.KEYS.get(`key:${token}`);
   if (raw === null) return null;
   const stored = JSON.parse(raw);
   return { engine: engineOf(stored.engine) };
 }
+
+/** Which engine each paid endpoint spends, so a key only reaches the one it is set to. */
+const ENDPOINT_ENGINE = { "/agent/token": "elevenlabs", "/deepgram-token": "deepgram" };
 
 /**
  * The shared password, kept for one job only: seeding the allowlist when it is empty,
@@ -176,7 +177,7 @@ export default {
     }
     if (path === "/admin/verify" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
-      return verifyCode(req, env, json);
+      return verifyCode(req, env, json, ctx);
     }
 
     if (path.startsWith("/admin/")) {
@@ -223,8 +224,23 @@ export default {
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-    const who = await caller(req, env);
+    if (path !== "/engine" && !Object.hasOwn(ENDPOINT_ENGINE, path)) return json({ error: "not found" }, 404);
+
+    // The address limit comes first so guessing keys costs a stranger as much as using one.
+    if (!(await withinLimit(env.TOKEN_IP_LIMIT, clientIp(req)))) {
+      return json({ error: "too many requests" }, 429);
+    }
+    const token = req.headers.get("x-vibe-token") ?? "";
+    const who = await caller(token, env);
     if (!who) return json({ error: "nope" }, 401);
+    // Hashed so the limiter never holds a live credential; minting shares one budget.
+    const bucket = `${path === "/engine" ? "engine" : "mint"}:${await sha256(token)}`;
+    if (!(await withinLimit(env.TOKEN_KEY_LIMIT, bucket))) {
+      return json({ error: "too many requests" }, 429);
+    }
+    if (ENDPOINT_ENGINE[path] && ENDPOINT_ENGINE[path] !== who.engine) {
+      return json({ error: "key is set to another engine" }, 403);
+    }
 
     // Asked before every conversation, so a switch in the admin page applies to the next one.
     if (path === "/engine") return json({ engine: who.engine });

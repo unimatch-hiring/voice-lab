@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import worker from "./index.js";
+import worker, { AddressGuard } from "./index.js";
+import { ALERT_THRESHOLD, CODES_PER_DAY, MAX_TRIES } from "./guard.js";
 
 const ORIGIN = "http://localhost:5173";
 
@@ -27,14 +28,58 @@ function fakeKv(initial = {}) {
   };
 }
 
+/** Two live interview keys, one per engine. */
+const LIVE_KEYS = {
+  "key:vibe_el": JSON.stringify({ engine: "elevenlabs" }),
+  "key:vibe_dg": JSON.stringify({ engine: "deepgram" }),
+};
+
+/**
+ * Durable Object namespace double running the real AddressGuard, one instance per name,
+ * over a synchronous store the way SQLite-backed storage is.
+ */
+function fakeGuards() {
+  const objects = new Map();
+  const make = () => {
+    const data = new Map();
+    const kv = {
+      get: (k) => (data.has(k) ? structuredClone(data.get(k)) : undefined),
+      put: (k, v) => void data.set(k, structuredClone(v)),
+      delete: (k) => data.delete(k),
+    };
+    return new AddressGuard({ storage: { kv } });
+  };
+  return {
+    objects,
+    idFromName: (name) => name,
+    get: (name) => {
+      if (!objects.has(name)) objects.set(name, make());
+      const object = objects.get(name);
+      return { fetch: (url, init) => object.fetch(new Request(url, init)) };
+    },
+  };
+}
+
+/** Rate limiter double: allows `limit` calls per key, records every key it was asked about. */
+function fakeLimiter(limit) {
+  const counts = new Map();
+  return {
+    counts,
+    limit: async ({ key }) => {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      return { success: counts.get(key) <= limit };
+    },
+  };
+}
+
 function env(over = {}) {
   return {
     ALLOWED_ORIGINS: ORIGIN,
     AGENT_ID: "agent_test",
     ELEVENLABS_API_KEY: "el-key",
-    VIBE_TOKEN: "permanent",
     ADMIN_TOKEN: "admin-secret",
-    KEYS: fakeKv(),
+    KEYS: fakeKv(LIVE_KEYS),
+    GUARD: fakeGuards(),
     ...over,
   };
 }
@@ -69,29 +114,37 @@ function fakeCtx() {
   return { waitUntil: (p) => deferred.push(p), settle: () => Promise.all(deferred) };
 }
 
-function req(path, { method = "POST", origin = ORIGIN, headers = {}, body } = {}) {
+function req(path, { method = "POST", origin = ORIGIN, headers = {}, body, ip = "203.0.113.7" } = {}) {
   return new Request(`https://worker.test${path}`, {
     method,
-    headers: { origin, ...headers },
+    headers: { origin, "cf-connecting-ip": ip, ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
 
 /** ElevenLabs is never really called; the API key must not leave the Worker. */
 function stubElevenLabs() {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ token: "session-token" }), { status: 200 }),
+  return vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () => new Response(JSON.stringify({ token: "session-token" }), { status: 200 }),
   );
 }
 
 beforeEach(() => vi.restoreAllMocks());
 
 describe("minting a session token", () => {
-  it("accepts the permanent token", async () => {
+  it("accepts a live key on the ElevenLabs engine", async () => {
     stubElevenLabs();
-    const r = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "permanent" } }), env());
+    const r = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_el" } }), env());
     expect(r.status).toBe(200);
     expect((await r.json()).token).toBe("session-token");
+  });
+
+  it("no longer honours a permanent token from the environment: every key expires", async () => {
+    const fetchSpy = stubElevenLabs();
+    const e = env({ VIBE_TOKEN: "permanent" });
+    const r = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "permanent" } }), e);
+    expect(r.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("accepts an interview key that is still in KV", async () => {
@@ -108,19 +161,18 @@ describe("minting a session token", () => {
 
   it("rejects an unknown origin before looking at any token", async () => {
     const r = await worker.fetch(
-      req("/agent/token", { origin: "https://evil.test", headers: { "x-vibe-token": "permanent" } }),
+      req("/agent/token", { origin: "https://evil.test", headers: { "x-vibe-token": "vibe_el" } }),
       env(),
     );
     expect(r.status).toBe(403);
   });
 
-  it("still works with no KV bound, so a plain deployment is unaffected", async () => {
-    stubElevenLabs();
+  it("refuses everyone when no KV is bound, since there is nothing to check a key against", async () => {
     const r = await worker.fetch(
-      req("/agent/token", { headers: { "x-vibe-token": "permanent" } }),
+      req("/agent/token", { headers: { "x-vibe-token": "vibe_el" } }),
       env({ KEYS: undefined }),
     );
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(401);
   });
 });
 
@@ -137,7 +189,7 @@ describe("minting a Deepgram grant", () => {
   it("asks Deepgram for a grant with the key and hands back only the grant", async () => {
     const fetchSpy = stubDeepgram();
     const r = await worker.fetch(
-      req("/deepgram-token", { headers: { "x-vibe-token": "permanent" } }),
+      req("/deepgram-token", { headers: { "x-vibe-token": "vibe_dg" } }),
       dg(),
     );
 
@@ -168,7 +220,7 @@ describe("minting a Deepgram grant", () => {
   it("says Deepgram is not configured rather than calling it without a key", async () => {
     const fetchSpy = stubDeepgram();
     const r = await worker.fetch(
-      req("/deepgram-token", { headers: { "x-vibe-token": "permanent" } }),
+      req("/deepgram-token", { headers: { "x-vibe-token": "vibe_dg" } }),
       env(),
     );
     expect(r.status).toBe(503);
@@ -178,7 +230,7 @@ describe("minting a Deepgram grant", () => {
   it("reports an upstream refusal as a gateway error", async () => {
     stubDeepgram(403);
     const r = await worker.fetch(
-      req("/deepgram-token", { headers: { "x-vibe-token": "permanent" } }),
+      req("/deepgram-token", { headers: { "x-vibe-token": "vibe_dg" } }),
       dg(),
     );
     expect(r.status).toBe(502);
@@ -195,9 +247,8 @@ describe("choosing the engine", () => {
     expect(await (await engineFor("vibe_dg", e)).json()).toEqual({ engine: "deepgram" });
   });
 
-  it("defaults to ElevenLabs for the permanent token and for keys issued before the switch", async () => {
+  it("defaults to ElevenLabs for keys issued before the switch", async () => {
     const e = env({ KEYS: fakeKv({ "key:vibe_old": JSON.stringify({ label: "x" }) }) });
-    expect((await (await engineFor("permanent", e)).json()).engine).toBe("elevenlabs");
     expect((await (await engineFor("vibe_old", e)).json()).engine).toBe("elevenlabs");
   });
 
@@ -553,5 +604,228 @@ describe("signing in by code", () => {
     );
 
     expect((await worker.fetch(req("/admin/keys", { method: "GET", headers }), e)).status).toBe(401);
+  });
+});
+
+describe("limits per caller address", () => {
+  it("cuts off one address asking for codes across many emails", async () => {
+    stubSlack();
+    const e = env({ SIGNIN_IP_LIMIT: fakeLimiter(2) });
+    const ask = (email, ip) => worker.fetch(req("/admin/signin", { body: { email }, ip }), e);
+
+    expect((await ask("a@x.test", "198.51.100.1")).status).toBe(200);
+    expect((await ask("b@x.test", "198.51.100.1")).status).toBe(200);
+    expect((await ask("c@x.test", "198.51.100.1")).status).toBe(429);
+    expect((await ask("c@x.test", "198.51.100.2")).status).toBe(200);
+  });
+
+  it("cuts off one address guessing codes across many emails", async () => {
+    const e = env({ VERIFY_IP_LIMIT: fakeLimiter(2) });
+    const guess = (email, ip) =>
+      worker.fetch(req("/admin/verify", { body: { email, code: "00000000" }, ip }), e);
+
+    expect((await guess("a@x.test", "198.51.100.1")).status).toBe(401);
+    expect((await guess("b@x.test", "198.51.100.1")).status).toBe(401);
+    expect((await guess("c@x.test", "198.51.100.1")).status).toBe(429);
+    expect((await guess("c@x.test", "198.51.100.2")).status).toBe(401);
+  });
+
+  it("still limits by email when the guesses come from many addresses", async () => {
+    const e = env({ VERIFY_LIMIT: fakeLimiter(1) });
+    const guess = (ip) =>
+      worker.fetch(req("/admin/verify", { body: { email: "a@x.test", code: "1" }, ip }), e);
+    expect((await guess("198.51.100.1")).status).toBe(401);
+    expect((await guess("198.51.100.2")).status).toBe(429);
+  });
+});
+
+describe("limits on spending minutes", () => {
+  it("mints at most six tokens a minute for one key", async () => {
+    const fetchSpy = stubElevenLabs();
+    const limiter = fakeLimiter(6);
+    const e = env({ TOKEN_KEY_LIMIT: limiter });
+    const statuses = [];
+    for (let i = 0; i < 7; i++) {
+      const r = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_el" } }), e);
+      statuses.push(r.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 200, 429]);
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    expect([...limiter.counts.keys()].join(), "the limiter never sees the key itself").not.toContain("vibe_el");
+  });
+
+  it("gives each key its own budget", async () => {
+    stubElevenLabs();
+    const e = env({
+      TOKEN_KEY_LIMIT: fakeLimiter(1),
+      KEYS: fakeKv({ ...LIVE_KEYS, "key:vibe_two": JSON.stringify({ engine: "elevenlabs" }) }),
+    });
+    const mint = (token) => worker.fetch(req("/agent/token", { headers: { "x-vibe-token": token } }), e);
+    expect((await mint("vibe_el")).status).toBe(200);
+    expect((await mint("vibe_el")).status).toBe(429);
+    expect((await mint("vibe_two")).status).toBe(200);
+  });
+
+  it("counts asking for the engine apart from minting, so the page's check does not eat the budget", async () => {
+    stubElevenLabs();
+    const e = env({ TOKEN_KEY_LIMIT: fakeLimiter(1) });
+    const call = (path) => worker.fetch(req(path, { headers: { "x-vibe-token": "vibe_el" } }), e);
+    expect((await call("/engine")).status).toBe(200);
+    expect((await call("/agent/token")).status).toBe(200);
+    expect((await call("/engine")).status).toBe(429);
+  });
+
+  it("limits one address before looking at its key, so guessing keys is limited too", async () => {
+    const e = env({ TOKEN_IP_LIMIT: fakeLimiter(2) });
+    const mint = (token) => worker.fetch(req("/agent/token", { headers: { "x-vibe-token": token } }), e);
+    expect((await mint("vibe_guess1")).status).toBe(401);
+    expect((await mint("vibe_guess2")).status).toBe(401);
+    const reads = e.KEYS.reads.length;
+    expect((await mint("vibe_guess3")).status).toBe(429);
+    expect(e.KEYS.reads.length).toBe(reads);
+  });
+});
+
+describe("a key reaches only its own engine", () => {
+  it("will not mint a Deepgram grant for an ElevenLabs key", async () => {
+    const fetchSpy = stubDeepgram();
+    const e = env({ DEEPGRAM_API_KEY: "dg-secret" });
+    const r = await worker.fetch(req("/deepgram-token", { headers: { "x-vibe-token": "vibe_el" } }), e);
+    expect(r.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("will not mint an ElevenLabs token for a Deepgram key", async () => {
+    const fetchSpy = stubElevenLabs();
+    const r = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_dg" } }), env());
+    expect(r.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("counting sign-in attempts", () => {
+  const LISTED = "stas@unimatch.ai";
+  const OTHER_ADMIN = "U0OTHER";
+
+  async function listed() {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
+    await e.KEYS.put("admin:other@unimatch.ai", OTHER_ADMIN);
+    return e;
+  }
+
+  /** Asks for a code and returns it; `sent` keeps every DM the bot was asked to send. */
+  async function requestCode(e, sent) {
+    const ctx = fakeCtx();
+    const before = sent.length;
+    await worker.fetch(req("/admin/signin", { body: { email: LISTED } }), e, ctx);
+    await ctx.settle();
+    const dm = sent.slice(before).find((m) => /\d{8}/.test(m.text));
+    return dm?.text.match(/\d{8}/)[0];
+  }
+
+  const verify = (e, code, ctx) =>
+    worker.fetch(req("/admin/verify", { body: { email: LISTED, code } }), e, ctx);
+
+  const alerts = (sent) => sent.filter((m) => m.text.includes("wrong sign-in codes"));
+
+  it("counts every one of twenty parallel wrong guesses and burns the code at the cap", async () => {
+    const e = await listed();
+    const sent = stubSlack();
+    const code = await requestCode(e, sent);
+
+    const ctx = fakeCtx();
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => verify(e, code === "00000000" ? "00000001" : "00000000", ctx)),
+    );
+    await ctx.settle();
+
+    expect(results.map((r) => r.status)).toEqual(Array(20).fill(401));
+    const bodies = await Promise.all(results.map((r) => r.json()));
+    expect(bodies.filter((b) => b.error === "wrong code")).toHaveLength(MAX_TRIES - 1);
+    expect(e.GUARD.objects.get(LISTED).store.get("failures")).toHaveLength(20);
+    expect((await verify(e, code)).status, "the real code is dead after the cap").toBe(401);
+  });
+
+  it("accepts a code once even when it arrives twice at the same moment", async () => {
+    const e = await listed();
+    const sent = stubSlack();
+    const code = await requestCode(e, sent);
+    const results = await Promise.all([verify(e, code), verify(e, code)]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 401]);
+  });
+
+  it("logs a warning for every failed guess", async () => {
+    const e = await listed();
+    const sent = stubSlack();
+    await requestCode(e, sent);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 3; i++) await verify(e, "12345678");
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it("caps codes per address per day, not only per quarter hour", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const e = await listed();
+      const sent = stubSlack();
+      let issued = 0;
+      for (let i = 0; i < CODES_PER_DAY + 2; i++) {
+        vi.setSystemTime(Date.UTC(2026, 0, 1) + i * 16 * 60_000);
+        if (await requestCode(e, sent)) issued++;
+      }
+      expect(issued).toBe(CODES_PER_DAY);
+
+      vi.setSystemTime(Date.UTC(2026, 0, 2, 12));
+      expect(await requestCode(e, sent), "the ceiling lifts after a day").toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still sends no more than three codes in a quarter hour", async () => {
+    const e = await listed();
+    const sent = stubSlack();
+    const codes = [];
+    for (let i = 0; i < 4; i++) codes.push(await requestCode(e, sent));
+    expect(codes.filter(Boolean)).toHaveLength(3);
+  });
+
+  it("alerts every admin once when wrong codes pile up, and not again inside the window", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.UTC(2026, 0, 1));
+      const e = await listed();
+      const sent = stubSlack();
+      await requestCode(e, sent);
+
+      for (let i = 0; i < ALERT_THRESHOLD; i++) await verify(e, "12345678");
+      expect(alerts(sent), "at the threshold, not yet").toHaveLength(0);
+
+      for (let i = 0; i < 15; i++) await verify(e, "12345678");
+      expect(alerts(sent).map((m) => m.channel).sort()).toEqual([OTHER_ADMIN, "U0STAS"].sort());
+
+      vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 11));
+      for (let i = 0; i <= ALERT_THRESHOLD; i++) await verify(e, "12345678");
+      expect(alerts(sent), "a new window, a new alert").toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("alerts once when one address asks for codes over and over", async () => {
+    const e = await listed();
+    const sent = stubSlack();
+    for (let i = 0; i < ALERT_THRESHOLD + 5; i++) await requestCode(e, sent);
+    const raised = sent.filter((m) => m.text.includes("sign-in code requests"));
+    expect(raised).toHaveLength(2); // one DM per admin
+  });
+
+  it("does not count guesses against an address that never had a code", async () => {
+    const e = env();
+    for (let i = 0; i < ALERT_THRESHOLD + 2; i++) {
+      await worker.fetch(req("/admin/verify", { body: { email: "nobody@x.test", code: "1" } }), e);
+    }
+    expect(e.GUARD.objects.get("nobody@x.test").store.get("failures")).toBeUndefined();
   });
 });
