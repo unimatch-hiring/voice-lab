@@ -112,7 +112,8 @@
 
 .admin-who {
   font: 600 13px/1 var(--sans);
-  color: var(--ink);
+  /* The panel is the dark rack in both themes; --ink is near-black in the light one. */
+  color: var(--rack-ink);
 }
 
 .admin-token {
