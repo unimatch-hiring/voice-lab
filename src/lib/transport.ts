@@ -1,3 +1,5 @@
+import type { Engine } from "./pipeline/session";
+
 export interface TransportConfig {
   workerUrl: string;
   vibeToken: string;
@@ -11,6 +13,10 @@ export interface LlmMessage {
 export interface Transport {
   /** Session token for ElevenLabs Agents; the API key stays in the Worker. */
   agentToken(): Promise<{ token: string; agentId: string }>;
+  /** Short-lived Deepgram grant; it only has to be valid while the socket opens. */
+  deepgramToken(): Promise<{ token: string }>;
+  /** Which engine this key was set to in the admin page. */
+  engine(): Promise<Engine>;
 }
 
 type FetchLike = typeof fetch;
@@ -34,5 +40,15 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
       return (await r.json()) as { token: string; agentId: string };
     },
 
+    deepgramToken: async () => {
+      const r = await post("/deepgram-token");
+      return (await r.json()) as { token: string };
+    },
+
+    engine: async () => {
+      const r = await post("/engine");
+      const { engine } = (await r.json()) as { engine?: string };
+      return engine === "deepgram" ? "deepgram" : "elevenlabs";
+    },
   };
 }

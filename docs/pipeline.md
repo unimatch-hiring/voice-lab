@@ -63,3 +63,35 @@ Two consequences. It applies **once, at session start** — a running conversati
 role it opened with, so switching roles means a new session. And the agent must permit the
 override: with it disallowed the server closes the connection instead of ignoring the
 field, which reaches the page as a dropped conversation rather than an error about prompts.
+
+## Backup engine: Deepgram
+
+When ElevenLabs is down, a key can be switched to [Deepgram's Voice Agent
+API](https://developers.deepgram.com/docs/voice-agent) in the admin page.
+[`deepgramSession.ts`](../src/lib/pipeline/deepgramSession.ts) implements the same
+`VoiceSession` as `agentSession.ts`, so the page does not know which one it runs.
+
+What differs, and why the page says so:
+
+- One WebSocket carries everything: `Settings` after `Welcome`, microphone PCM after
+  `SettingsApplied`, agent PCM back. There is no SDK; capture and playback are ours
+  ([`deepgramAudio.ts`](../src/lib/pipeline/deepgramAudio.ts)), on one `AudioContext` for
+  the echo reason above.
+- The role, the models and the functions go in `Settings`. Functions run in the page:
+  `FunctionCallRequest` → `FunctionCallResponse` with the same `id`, and nothing for a
+  call named in `FunctionCallCancelled`.
+- `sendText` and `injectAgentMessage` map to `InjectUserMessage` and `InjectAgentMessage`.
+- `UserStartedSpeaking` is the barge-in signal: queued agent audio is dropped. A reply ends
+  when local playback drains, not at `AgentAudioDone`, which only means the last chunk left
+  the server.
+- Aura voices are English-only, hence the notice on the page.
+
+| Stage | Opened by | Closed by |
+|---|---|---|
+| `capture` | `SettingsApplied`, `UserStartedSpeaking`, playback draining | next stage |
+| `stt` | `UserStartedSpeaking` | user `ConversationText` |
+| `llm` | user `ConversationText` | first agent audio |
+| `tts` | first agent audio | `AgentAudioDone` or barge-in |
+| `playback` | first agent audio | playback draining or barge-in |
+
+There is no speech-probability event, so `vad` stays blank on this engine.

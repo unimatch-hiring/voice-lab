@@ -8,6 +8,8 @@ import {
   type InterviewKey,
 } from "./lib/adminKeys";
 import { loadConfig } from "./lib/config";
+import { ENGINE_LABEL } from "./lib/engine";
+import type { Engine } from "./lib/pipeline/session";
 import { loadAdminToken, saveAdminToken, clearAdminToken } from "./lib/tokenStore";
 import "./scene/tokens.css";
 import "./admin.css";
@@ -32,6 +34,7 @@ export function Admin() {
   const [busy, setBusy] = useState(false);
   const [hours, setHours] = useState(4);
   const [label, setLabel] = useState("");
+  const [engine, setEngine] = useState<Engine>("elevenlabs");
   /** The key just minted, held apart from the list so it can be shown big and copied. */
   const [fresh, setFresh] = useState<InterviewKey | null>(null);
   const [copied, setCopied] = useState(false);
@@ -86,7 +89,7 @@ export function Admin() {
   const issue = () =>
     run(async () => {
       const client = createAdminClient(workerUrl, session);
-      const key = await client.issue(hours, label.trim());
+      const key = await client.issue(hours, label.trim(), engine);
       setFresh(key);
       setCopied(false);
       setLabel("");
@@ -98,6 +101,13 @@ export function Admin() {
       const client = createAdminClient(workerUrl, session);
       await client.revoke(token);
       if (fresh?.token === token) setFresh(null);
+      setKeys(await client.list());
+    });
+
+  const switchEngine = (k: InterviewKey) =>
+    run(async () => {
+      const client = createAdminClient(workerUrl, session);
+      await client.setEngine(k.token, k.engine === "deepgram" ? "elevenlabs" : "deepgram");
       setKeys(await client.list());
     });
 
@@ -237,6 +247,21 @@ export function Admin() {
             ))}
           </div>
 
+          <span className="admin-ttl-label">Engine</span>
+          <div className="admin-ttl">
+            {(Object.keys(ENGINE_LABEL) as Engine[]).map((e) => (
+              <button
+                key={e}
+                type="button"
+                className="admin-chip"
+                data-on={engine === e}
+                onClick={() => setEngine(e)}
+              >
+                {ENGINE_LABEL[e]}
+              </button>
+            ))}
+          </div>
+
           <button className="talk" type="button" onClick={issue} disabled={busy}>
             {busy ? "Working…" : "Issue key"}
           </button>
@@ -267,6 +292,17 @@ export function Admin() {
                   <span className="admin-who">{k.label || "unnamed"}</span>
                   <code className="admin-token">{k.token}</code>
                   <span className="admin-left">{formatRemaining(k.expiresAt, now)}</span>
+                  <span className="admin-engine" data-engine={k.engine}>
+                    {ENGINE_LABEL[k.engine]}
+                  </span>
+                  <button
+                    className="admin-link"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => switchEngine(k)}
+                  >
+                    Switch to {ENGINE_LABEL[k.engine === "deepgram" ? "elevenlabs" : "deepgram"]}
+                  </button>
                   <button className="admin-link" type="button" onClick={() => revoke(k.token)}>
                     Revoke
                   </button>

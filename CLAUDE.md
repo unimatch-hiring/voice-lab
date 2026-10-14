@@ -1,7 +1,8 @@
 # voice-lab
 
 Interactive explainer of a voice-agent pipeline. We own the presentation; the conversation
-runs on [ElevenLabs Agents](https://elevenlabs.io/docs/agents-platform/overview). What the
+runs on [ElevenLabs Agents](https://elevenlabs.io/docs/agents-platform/overview), with
+Deepgram's Voice Agent API as a per-key backup ([pipeline](docs/pipeline.md)). What the
 thing is and how the directories divide up: [README](./README.md).
 
 ## Done means the checks pass

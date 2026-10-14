@@ -124,6 +124,146 @@ describe("minting a session token", () => {
   });
 });
 
+/** Deepgram's grant endpoint; records how it was called. */
+function stubDeepgram(status = 200) {
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ access_token: "dg-jwt", expires_in: 30 }), { status }),
+  );
+}
+
+describe("minting a Deepgram grant", () => {
+  const dg = (over = {}) => env({ DEEPGRAM_API_KEY: "dg-secret", ...over });
+
+  it("asks Deepgram for a grant with the key and hands back only the grant", async () => {
+    const fetchSpy = stubDeepgram();
+    const r = await worker.fetch(
+      req("/deepgram-token", { headers: { "x-vibe-token": "permanent" } }),
+      dg(),
+    );
+
+    expect(r.status).toBe(200);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toBe("https://api.deepgram.com/v1/auth/grant");
+    expect(init.method).toBe("POST");
+    expect(init.headers.authorization).toBe("Token dg-secret");
+    const text = await r.text();
+    expect(JSON.parse(text)).toEqual({ token: "dg-jwt" });
+    expect(text, "the API key never leaves the Worker").not.toContain("dg-secret");
+  });
+
+  it("accepts a live issued key", async () => {
+    stubDeepgram();
+    const e = dg({ KEYS: fakeKv({ "key:vibe_abc": JSON.stringify({ engine: "deepgram" }) }) });
+    const r = await worker.fetch(req("/deepgram-token", { headers: { "x-vibe-token": "vibe_abc" } }), e);
+    expect(r.status).toBe(200);
+  });
+
+  it("refuses a caller without a key before spending anything", async () => {
+    const fetchSpy = stubDeepgram();
+    const r = await worker.fetch(req("/deepgram-token", { headers: { "x-vibe-token": "vibe_gone" } }), dg());
+    expect(r.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("says Deepgram is not configured rather than calling it without a key", async () => {
+    const fetchSpy = stubDeepgram();
+    const r = await worker.fetch(
+      req("/deepgram-token", { headers: { "x-vibe-token": "permanent" } }),
+      env(),
+    );
+    expect(r.status).toBe(503);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports an upstream refusal as a gateway error", async () => {
+    stubDeepgram(403);
+    const r = await worker.fetch(
+      req("/deepgram-token", { headers: { "x-vibe-token": "permanent" } }),
+      dg(),
+    );
+    expect(r.status).toBe(502);
+    expect((await r.json()).status).toBe(403);
+  });
+});
+
+describe("choosing the engine", () => {
+  const engineFor = async (token, e) =>
+    worker.fetch(req("/engine", { headers: { "x-vibe-token": token } }), e);
+
+  it("tells the page which engine its key is set to", async () => {
+    const e = env({ KEYS: fakeKv({ "key:vibe_dg": JSON.stringify({ engine: "deepgram" }) }) });
+    expect(await (await engineFor("vibe_dg", e)).json()).toEqual({ engine: "deepgram" });
+  });
+
+  it("defaults to ElevenLabs for the permanent token and for keys issued before the switch", async () => {
+    const e = env({ KEYS: fakeKv({ "key:vibe_old": JSON.stringify({ label: "x" }) }) });
+    expect((await (await engineFor("permanent", e)).json()).engine).toBe("elevenlabs");
+    expect((await (await engineFor("vibe_old", e)).json()).engine).toBe("elevenlabs");
+  });
+
+  it("refuses a stranger", async () => {
+    expect((await engineFor("vibe_gone", env())).status).toBe(401);
+  });
+
+  it("issues a key on the engine asked for", async () => {
+    const e = env();
+    const r = await worker.fetch(
+      req("/admin/keys", { headers: await signIn(e.KEYS), body: { engine: "deepgram" } }),
+      e,
+    );
+    const issued = await r.json();
+    expect(issued.engine).toBe("deepgram");
+    expect((await (await engineFor(issued.token, e)).json()).engine).toBe("deepgram");
+  });
+
+  it("switches a live key without extending its life", async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS);
+    const expiresAt = Date.now() + 3600_000;
+    await e.KEYS.put("key:vibe_k", JSON.stringify({ label: "c", engine: "elevenlabs", issuedAt: 1, expiresAt }));
+
+    const r = await worker.fetch(
+      req("/admin/keys/vibe_k", { method: "PATCH", headers, body: { engine: "deepgram" } }),
+      e,
+    );
+
+    expect(r.status).toBe(200);
+    expect((await (await engineFor("vibe_k", e)).json()).engine).toBe("deepgram");
+    const stored = JSON.parse(await e.KEYS.get("key:vibe_k"));
+    expect(stored.expiresAt).toBe(expiresAt);
+    expect(e.KEYS.ttls.get("key:vibe_k")).toBeLessThanOrEqual(3600);
+  });
+
+  it("refuses an engine it does not know", async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS);
+    await e.KEYS.put("key:vibe_k", JSON.stringify({ expiresAt: Date.now() + 3600_000 }));
+    const r = await worker.fetch(
+      req("/admin/keys/vibe_k", { method: "PATCH", headers, body: { engine: "openai" } }),
+      e,
+    );
+    expect(r.status).toBe(400);
+  });
+
+  it("will not let a key holder switch its own engine: it takes an admin session", async () => {
+    const e = env({ KEYS: fakeKv({ "key:vibe_k": JSON.stringify({ expiresAt: Date.now() + 3600_000 }) }) });
+    const r = await worker.fetch(
+      req("/admin/keys/vibe_k", {
+        method: "PATCH",
+        headers: { "x-vibe-token": "vibe_k" },
+        body: { engine: "deepgram" },
+      }),
+      e,
+    );
+    expect(r.status).toBe(401);
+  });
+
+  it("lets the browser send PATCH across origins", async () => {
+    const r = await worker.fetch(req("/admin/keys/x", { method: "OPTIONS" }), env());
+    expect(r.headers.get("access-control-allow-methods")).toContain("PATCH");
+  });
+});
+
 describe("issuing interview keys", () => {
   it("issues a prefixed key and stores it under a TTL", async () => {
     const e = env();

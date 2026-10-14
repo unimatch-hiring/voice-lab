@@ -1,21 +1,10 @@
 import { Conversation } from "@elevenlabs/client";
-import type { EventBus } from "../events";
 import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
-import type { Transport } from "../transport";
 import type { StageName, TurnMetrics } from "../types";
+import type { SessionDeps, VoiceSession } from "./session";
 
-export interface AgentSessionDeps {
-  bus: EventBus;
-  transport: Transport;
-  /** Called when a turn completes, with what each stage cost. */
-  onTurn: (metrics: TurnMetrics) => void;
-  /**
-   * The conversation ended. `reason` says who ended it: the user pressed stop, the agent
-   * decided it was done, or the connection failed.
-   */
-  onEnded: (reason: "user" | "agent" | "error", message?: string) => void;
-}
+export type AgentSessionDeps = SessionDeps;
 
 /**
  * Translates ElevenLabs Agents events into the stage stream the scene draws.
@@ -34,7 +23,7 @@ const VAD_SPEECH = 0.5;
  */
 const FROZEN_MS = 250;
 
-export class AgentSession {
+export class AgentSession implements VoiceSession {
   private conversation: Awaited<ReturnType<typeof Conversation.startSession>> | null = null;
   private running = false;
 

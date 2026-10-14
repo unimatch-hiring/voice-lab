@@ -20,7 +20,7 @@ function corsHeaders(req, env) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-headers": "content-type,x-vibe-token,x-admin-token,x-admin-session",
-    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "access-control-max-age": "86400", // a day: no preflight on every request
     vary: "Origin",
   };
@@ -54,17 +54,26 @@ function secretEquals(a, b) {
   return diff === 0;
 }
 
+const ENGINES = ["elevenlabs", "deepgram"];
+const DEFAULT_ENGINE = "elevenlabs";
+
+const engineOf = (value) => (ENGINES.includes(value) ? value : DEFAULT_ENGINE);
+
 /**
- * Who may mint ElevenLabs session tokens: the permanent VIBE_TOKEN, or an
+ * Who may mint session tokens, and on which engine: the permanent VIBE_TOKEN, or an
  * interview key still alive in KV. The permanent one is checked first so the
  * deployed site and local dev keep working with no KV namespace bound at all.
+ * Returns null for a stranger.
  */
-async function callerAllowed(req, env) {
+async function caller(req, env) {
   const token = req.headers.get("x-vibe-token") ?? "";
-  if (!token) return false;
-  if (env.VIBE_TOKEN && secretEquals(token, env.VIBE_TOKEN)) return true;
-  if (!env.KEYS) return false;
-  return (await env.KEYS.get(`key:${token}`)) !== null;
+  if (!token) return null;
+  if (env.VIBE_TOKEN && secretEquals(token, env.VIBE_TOKEN)) return { engine: DEFAULT_ENGINE };
+  if (!env.KEYS) return null;
+  const raw = await env.KEYS.get(`key:${token}`);
+  if (raw === null) return null;
+  const stored = JSON.parse(raw);
+  return { engine: engineOf(stored.engine) };
 }
 
 /**
@@ -85,17 +94,37 @@ async function issueInterviewKey(req, env, json) {
   }
 
   const label = typeof body.label === "string" ? body.label.slice(0, 80) : "";
+  const engine = engineOf(body.engine);
   const token = issuedKey();
   const issuedAt = Date.now();
   // KV refuses a TTL under a minute, so the stored lifetime — not the requested one — is
   // what expiresAt has to describe. Otherwise the page calls a key expired while the
   // Worker still honours it.
   const ttlSeconds = Math.max(MIN_TTL_SECONDS, Math.round(hours * 3600));
-  const record = { label, issuedAt, expiresAt: issuedAt + ttlSeconds * 1000 };
+  const record = { label, engine, issuedAt, expiresAt: issuedAt + ttlSeconds * 1000 };
 
   await env.KEYS.put(`key:${token}`, JSON.stringify(record), { expirationTtl: ttlSeconds });
 
   return json({ token, ...record });
+}
+
+/**
+ * Moves a live key to the other engine, e.g. when ElevenLabs is down mid-session. The
+ * record is rewritten with what is left of its lifetime, so switching never extends a key.
+ */
+async function setKeyEngine(token, req, env, json) {
+  const body = await req.json().catch(() => ({}));
+  if (!ENGINES.includes(body.engine)) {
+    return json({ error: `engine must be one of ${ENGINES.join(", ")}` }, 400);
+  }
+  const raw = await env.KEYS.get(`key:${token}`);
+  if (raw === null) return json({ error: "no such key" }, 404);
+  const stored = JSON.parse(raw);
+  const leftSeconds = Math.round(((stored.expiresAt ?? 0) - Date.now()) / 1000);
+  if (leftSeconds < MIN_TTL_SECONDS) return json({ error: "key is about to expire" }, 409);
+  const record = { ...stored, engine: body.engine };
+  await env.KEYS.put(`key:${token}`, JSON.stringify(record), { expirationTtl: leftSeconds });
+  return json({ token, engine: record.engine });
 }
 
 async function listInterviewKeys(env, json) {
@@ -110,6 +139,7 @@ async function listInterviewKeys(env, json) {
       return {
         token: name.slice("key:".length),
         label: stored.label ?? "",
+        engine: engineOf(stored.engine),
         issuedAt: stored.issuedAt ?? 0,
         expiresAt: stored.expiresAt ?? 0,
       };
@@ -172,6 +202,11 @@ export default {
 
       if (req.method === "POST" && path === "/admin/keys") return issueInterviewKey(req, env, json);
       if (req.method === "GET" && path === "/admin/keys") return listInterviewKeys(env, json);
+      if (req.method === "PATCH") {
+        const token = decodeURIComponent(path.slice("/admin/keys/".length));
+        if (!token) return json({ error: "token required" }, 400);
+        return setKeyEngine(token, req, env, json);
+      }
       if (req.method === "DELETE") {
         // The client percent-encodes the token, so the raw pathname would delete a key
         // spelled differently from the one that exists.
@@ -188,7 +223,11 @@ export default {
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-    if (!(await callerAllowed(req, env))) return json({ error: "nope" }, 401);
+    const who = await caller(req, env);
+    if (!who) return json({ error: "nope" }, 401);
+
+    // Asked before every conversation, so a switch in the admin page applies to the next one.
+    if (path === "/engine") return json({ engine: who.engine });
 
     // Session token for ElevenLabs Agents: short-lived and scoped to one conversation, so
     // it can safely reach the browser. The API key never leaves the Worker.
@@ -200,6 +239,23 @@ export default {
       if (!r.ok) return json({ error: "upstream failed", status: r.status }, 502);
       const body = await r.json();
       return json({ token: body.token, agentId: env.AGENT_ID });
+    }
+
+    // Deepgram's grant lives 30 seconds and is only checked when the socket opens, so it
+    // can reach the browser; the API key itself never leaves the Worker.
+    if (path === "/deepgram-token") {
+      if (!env.DEEPGRAM_API_KEY) return json({ error: "deepgram not configured" }, 503);
+      const r = await fetch("https://api.deepgram.com/v1/auth/grant", {
+        method: "POST",
+        headers: {
+          authorization: `Token ${env.DEEPGRAM_API_KEY}`,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      });
+      if (!r.ok) return json({ error: "upstream failed", status: r.status }, 502);
+      const body = await r.json();
+      return json({ token: body.access_token });
     }
 
     return json({ error: "not found" }, 404);

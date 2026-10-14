@@ -35,6 +35,23 @@ describe("admin client", () => {
     );
   });
 
+  it("switches a key's engine with a PATCH on that key", async () => {
+    const fetchImpl = okJson({ token: "vibe_a", engine: "deepgram" });
+    await createAdminClient(URL_BASE, "secret", fetchImpl).setEngine("vibe_a", "deepgram");
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe(`${URL_BASE}/admin/keys/vibe_a`);
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({ engine: "deepgram" });
+  });
+
+  it("issues a key on the chosen engine", async () => {
+    const fetchImpl = okJson({ token: "vibe_a", engine: "deepgram" });
+    await createAdminClient(URL_BASE, "secret", fetchImpl).issue(4, "c", "deepgram");
+
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body)).engine).toBe("deepgram");
+  });
+
   it("escapes the token in the revoke path, so a stray character cannot reshape the URL", async () => {
     const fetchImpl = okJson({ revoked: "x" });
     await createAdminClient(URL_BASE, "secret", fetchImpl).revoke("vibe_a/../b");

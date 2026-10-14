@@ -1,4 +1,4 @@
-import { expect, test, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { App, startFailureMessage } from "./App";
 
@@ -14,9 +14,14 @@ vi.mock("./lib/tokenStore", () => ({
 
 beforeEach(() => {
   stored = "";
+  // With a token the page asks the Worker for its engine; tests must not reach the network.
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 // Regression: the field sat behind the settings toggle, so a first-time visitor saw
 // only a disabled button.
@@ -104,4 +109,34 @@ test("an unrecognised failure is passed through rather than swallowed", () => {
   expect(startFailureMessage(new Error("websocket closed unexpectedly"))).toBe(
     "websocket closed unexpectedly",
   );
+});
+
+describe("the backup engine notice", () => {
+  const workerSays = (engine: string) =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).endsWith("/engine")
+        ? new Response(JSON.stringify({ engine }), { status: 200 })
+        : new Response("{}", { status: 404 }),
+    );
+
+  test("is on screen when the key is set to Deepgram", async () => {
+    stored = "vibe_test";
+    workerSays("deepgram");
+    render(<App />);
+
+    expect(await screen.findByRole("status")).toHaveProperty(
+      "textContent",
+      "Backup engine: English only, Deepgram voice",
+    );
+  });
+
+  test("is absent on ElevenLabs", async () => {
+    stored = "vibe_test";
+    const fetchSpy = workerSays("elevenlabs");
+    render(<App />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/backup engine/i)).toBeNull();
+  });
 });

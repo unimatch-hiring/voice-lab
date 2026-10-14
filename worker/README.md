@@ -39,6 +39,7 @@ Live since 13.08.2026: the namespace is bound in `wrangler.toml`.
 | `POST /admin/keys` | issue one; body `{hours, label}`, capped at 24h |
 | `GET /admin/keys` | list the live ones |
 | `DELETE /admin/keys/:token` | revoke immediately |
+| `PATCH /admin/keys/:token` | switch the key's engine, body `{engine}`; the expiry stays |
 
 All three need `x-admin-session` — a session from the sign-in below. A key handed to a
 candidate never opens them; otherwise the candidate could issue more.
@@ -89,13 +90,32 @@ Everyone else gets `403`. Changing it needs no code edit: adjust `[vars]` and
 For GitHub Pages the origin is the host only (`https://<org>.github.io`), without
 the project path.
 
+## Backup engine
+
+Each issued key carries an engine, `elevenlabs` (default) or `deepgram`, set when the
+key is issued or switched later from the admin page. The page asks before every
+conversation, so a switch applies to the next one.
+
+| | |
+|---|---|
+| `POST /engine` | `{engine}` for the caller's key; `VIBE_TOKEN` and older keys answer `elevenlabs` |
+| `POST /deepgram-token` | `{token}` — a 30-second grant from `POST /v1/auth/grant` |
+
+`DEEPGRAM_API_KEY` is a Worker secret. The grant endpoint needs a key with at least the
+Member role; a Default key gets `403` and the page reports the start as failed. The LLM and
+the voice are Deepgram-managed, so no other provider key is involved.
+
 ## Local development
 
 `.dev.vars` (gitignored, never commit):
 
 ```
 ELEVENLABS_API_KEY=...
+DEEPGRAM_API_KEY=...
 VIBE_TOKEN=dev
 ```
+
+A key on the Deepgram engine for local runs goes into the local KV:
+`wrangler kv key put --binding KEYS --local "key:vibe_dev" '{"engine":"deepgram","expiresAt":<ms>}'`.
 
 `wrangler dev` → http://localhost:8787
