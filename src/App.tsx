@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EventBus } from "./lib/events";
-import { AgentSession } from "./lib/pipeline/agentSession";
-import { createTransport } from "./lib/transport";
+import { createSession } from "./lib/pipeline/createSession";
+import type { Engine, SessionDeps, VoiceSession } from "./lib/pipeline/session";
+import { BACKUP_ENGINE_NOTICE } from "./lib/engine";
+import { createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
@@ -16,7 +18,7 @@ import "./scene/tokens.css";
  * Turns a failed start into something the visitor can act on. The browser's own wording
  * for a denied microphone ("Permission denied") does not say which permission, or where.
  */
-export function startFailureMessage(e: unknown): string {
+export function startFailureMessage(e: unknown, engine: Engine = "elevenlabs"): string {
   const name = e instanceof DOMException ? e.name : "";
   const raw = e instanceof Error ? e.message : String(e);
 
@@ -25,6 +27,14 @@ export function startFailureMessage(e: unknown): string {
   }
   if (name === "NotFoundError") {
     return "No microphone found. Connect one and start again.";
+  }
+  // Past the microphone, the backup engine fails on our key or on a service it depends on:
+  // a Worker 502 or a dropped socket is not the visitor's token.
+  if (engine === "deepgram") {
+    if (e instanceof WorkerError && e.status === 401) {
+      return "The access token was not accepted or has expired. Open settings and paste it again.";
+    }
+    return "Backup engine is unavailable right now, try again later.";
   }
   if (/401|403|token/i.test(raw)) {
     return "The access token was rejected. Open settings and paste it again.";
@@ -70,12 +80,32 @@ export function App() {
   // The session is built before the save helper exists, and its `onEnded` needs to call it.
   const saveRecordingRef = useRef<(() => void) | null>(null);
 
-  const session = useMemo(() => {
-    const transport = createTransport({
-      workerUrl: config.workerUrl,
-      vibeToken: config.vibeToken,
-    });
-    return new AgentSession({
+  const transport = useMemo(
+    () => createTransport({ workerUrl: config.workerUrl, vibeToken: config.vibeToken }),
+    [config],
+  );
+
+  // The engine is set per key in the admin page and can be switched mid-session, so it
+  // is asked for on load (for the notice) and again before every conversation.
+  const [engine, setEngine] = useState<Engine>("elevenlabs");
+  useEffect(() => {
+    if (config.offline) return;
+    let alive = true;
+    transport
+      .engine()
+      .then((e) => alive && setEngine(e))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [config, transport]);
+
+  const sessionRef = useRef<VoiceSession | null>(null);
+  /** The engine the last start attempt used, so its failure is worded for that engine. */
+  const engineRef = useRef<Engine>("elevenlabs");
+
+  const sessionDeps = useMemo((): SessionDeps => {
+    return {
       bus,
       transport,
       onTurn: (turn) => {
@@ -95,13 +125,13 @@ export function App() {
         );
         setEndedBy(reason);
       },
-    });
-  }, [bus, config, recorder]);
+    };
+  }, [bus, transport, recorder]);
 
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
   // mid-reply and leave the character frozen with its mouth open.
-  const mouthSource = useCallback(() => session.mouthSpectrum(), [session]);
+  const mouthSource = useCallback(() => sessionRef.current?.mouthSpectrum() ?? null, []);
 
   /** Downloads the finished conversation as a fixture file. */
   const saveRecording = () => {
@@ -123,8 +153,9 @@ export function App() {
 
   const toggleConversation = async () => {
     setError(null);
-    if (session.isRunning) {
-      await session.stop();
+    const running = sessionRef.current;
+    if (running?.isRunning) {
+      await running.stop();
       setTalking(false);
       setEndedBy("user");
       if (recording) saveRecording();
@@ -136,19 +167,26 @@ export function App() {
         setSavedAs(null);
         recorder.start();
       }
+      // An old Worker without the engine route means the default engine, not a failure.
+      const current = await transport.engine().catch(() => "elevenlabs" as const);
+      setEngine(current);
+      engineRef.current = current;
+      const session = createSession(current, sessionDeps);
+      sessionRef.current = session;
       await session.start();
       setTalking(true);
     } catch (e) {
-      setError(startFailureMessage(e));
+      setError(startFailureMessage(e, engineRef.current));
       setTalking(false);
     }
   };
 
   useEffect(
     () => () => {
-      void session.stop();
+      void sessionRef.current?.stop();
+      sessionRef.current = null;
     },
-    [session],
+    [sessionDeps],
   );
 
   return (
@@ -194,6 +232,12 @@ export function App() {
         )}
 
         <div className="panel-body">
+          {engine === "deepgram" && (
+            <p className="engine-notice" role="status">
+              {BACKUP_ENGINE_NOTICE}
+            </p>
+          )}
+
           <div className="transport">
             <button
               className="talk"

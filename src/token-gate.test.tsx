@@ -1,6 +1,7 @@
-import { expect, test, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { App, startFailureMessage } from "./App";
+import { WorkerError } from "./lib/transport";
 
 // jsdom has no IndexedDB, so the store is faked.
 let stored = "";
@@ -12,11 +13,28 @@ vi.mock("./lib/tokenStore", () => ({
   },
 }));
 
+// Lets a test decide how starting a conversation fails, without a microphone or socket.
+let startFails: unknown = null;
+vi.mock("./lib/pipeline/createSession", () => ({
+  createSession: () => ({
+    isRunning: false,
+    mouthSpectrum: () => null,
+    start: () => (startFails ? Promise.reject(startFails) : Promise.resolve()),
+    stop: () => Promise.resolve(),
+  }),
+}));
+
 beforeEach(() => {
+  startFails = null;
   stored = "";
+  // With a token the page asks the Worker for its engine; tests must not reach the network.
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 // Regression: the field sat behind the settings toggle, so a first-time visitor saw
 // only a disabled button.
@@ -104,4 +122,82 @@ test("an unrecognised failure is passed through rather than swallowed", () => {
   expect(startFailureMessage(new Error("websocket closed unexpectedly"))).toBe(
     "websocket closed unexpectedly",
   );
+});
+
+describe("start failures on the backup engine", () => {
+  test("a 401 from the Worker says the access token was not accepted", () => {
+    const msg = startFailureMessage(new WorkerError("/deepgram-token", 401), "deepgram");
+    expect(msg).toMatch(/not accepted or has expired/i);
+  });
+
+  test("a 502 from the Worker blames the engine, not the token", () => {
+    const msg = startFailureMessage(new WorkerError("/deepgram-token", 502), "deepgram");
+    expect(msg).toBe("Backup engine is unavailable right now, try again later.");
+    expect(msg).not.toMatch(/token/i);
+  });
+
+  test("a network failure blames the engine too", () => {
+    expect(startFailureMessage(new TypeError("Failed to fetch"), "deepgram")).toMatch(
+      /backup engine is unavailable/i,
+    );
+  });
+
+  test("a blocked microphone is still reported as such", () => {
+    const denied = new DOMException("Permission denied", "NotAllowedError");
+    expect(startFailureMessage(denied, "deepgram")).toMatch(/microphone is blocked/i);
+  });
+
+  test("the page words a Worker outage on the backup engine as an outage", async () => {
+    stored = "vibe_test";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).endsWith("/engine")
+        ? new Response(JSON.stringify({ engine: "deepgram" }), { status: 200 })
+        : new Response("{}", { status: 404 }),
+    );
+    startFails = new WorkerError("/deepgram-token", 502);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start conversation/i }));
+
+    expect(
+      await screen.findByText("Backup engine is unavailable right now, try again later."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/access token was rejected/i)).toBeNull();
+  });
+
+  test("ElevenLabs keeps its wording", () => {
+    expect(startFailureMessage(new WorkerError("/agent/token", 401))).toBe(
+      "The access token was rejected. Open settings and paste it again.",
+    );
+  });
+});
+
+describe("the backup engine notice", () => {
+  const workerSays = (engine: string) =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).endsWith("/engine")
+        ? new Response(JSON.stringify({ engine }), { status: 200 })
+        : new Response("{}", { status: 404 }),
+    );
+
+  test("is on screen when the key is set to Deepgram", async () => {
+    stored = "vibe_test";
+    workerSays("deepgram");
+    render(<App />);
+
+    expect(await screen.findByRole("status")).toHaveProperty(
+      "textContent",
+      "Backup engine: English only, Deepgram voice",
+    );
+  });
+
+  test("is absent on ElevenLabs", async () => {
+    stored = "vibe_test";
+    const fetchSpy = workerSays("elevenlabs");
+    render(<App />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/backup engine/i)).toBeNull();
+  });
 });

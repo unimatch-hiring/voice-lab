@@ -99,7 +99,7 @@
 
 .admin-list li {
   display: grid;
-  grid-template-columns: minmax(80px, 1fr) auto auto auto;
+  grid-template-columns: minmax(80px, 1fr) auto auto auto auto auto;
   gap: 12px;
   align-items: center;
   padding: 10px 0;
@@ -112,7 +112,8 @@
 
 .admin-who {
   font: 600 13px/1 var(--sans);
-  color: var(--ink);
+  /* The panel is the dark rack in both themes; --ink is near-black in the light one. */
+  color: var(--rack-ink);
 }
 
 .admin-token {
@@ -172,4 +173,14 @@
   color: var(--running);
   text-decoration: underline;
   cursor: pointer;
+}
+
+.admin-engine {
+  font: 600 12px/1 var(--mono);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.admin-engine[data-engine="deepgram"] {
+  color: var(--fail);
 }

@@ -6,17 +6,22 @@
  * only ever imported by the admin route.
  */
 
+import type { Engine } from "./pipeline/session";
+
 export interface InterviewKey {
   token: string;
   label: string;
+  engine: Engine;
   issuedAt: number;
   expiresAt: number;
 }
 
 export interface AdminClient {
-  issue(hours: number, label: string): Promise<InterviewKey>;
+  issue(hours: number, label: string, engine?: Engine): Promise<InterviewKey>;
   list(): Promise<InterviewKey[]>;
   revoke(token: string): Promise<void>;
+  /** Takes effect from the key's next conversation. */
+  setEngine(token: string, engine: Engine): Promise<void>;
 }
 
 type FetchLike = typeof fetch;
@@ -75,10 +80,10 @@ export function createAdminClient(
   };
 
   return {
-    issue: async (hours, label) => {
+    issue: async (hours, label, engine = "elevenlabs") => {
       const r = await call("/admin/keys", {
         method: "POST",
-        body: JSON.stringify({ hours, label }),
+        body: JSON.stringify({ hours, label, engine }),
       });
       return (await r.json()) as InterviewKey;
     },
@@ -90,6 +95,13 @@ export function createAdminClient(
 
     revoke: async (token) => {
       await call(`/admin/keys/${encodeURIComponent(token)}`, { method: "DELETE" });
+    },
+
+    setEngine: async (token, engine) => {
+      await call(`/admin/keys/${encodeURIComponent(token)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ engine }),
+      });
     },
   };
 }

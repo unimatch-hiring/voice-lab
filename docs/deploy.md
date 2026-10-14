@@ -23,7 +23,7 @@ Needs two repository secrets:
   zones, no billing.
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The provider keys (`ELEVENLABS_API_KEY`, `VIBE_TOKEN`, `ADMIN_TOKEN`) are bound to the
+The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `VIBE_TOKEN`, `ADMIN_TOKEN`) are bound to the
 Worker with `wrangler secret put` and are untouched by a deploy, so they never pass through
 CI. `AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
 
