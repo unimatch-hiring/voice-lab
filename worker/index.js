@@ -235,11 +235,12 @@ export default {
     if (!who) return json({ error: "nope" }, 401);
     // Hashed so the limiter never holds a live credential; minting shares one budget.
     const bucket = `${path === "/engine" ? "engine" : "mint"}:${await sha256(token)}`;
-    if (!(await withinLimit(env.TOKEN_KEY_LIMIT, bucket))) {
-      return json({ error: "too many requests" }, 429);
-    }
+    // Before the key's budget, so a request the key could never make does not spend it.
     if (ENDPOINT_ENGINE[path] && ENDPOINT_ENGINE[path] !== who.engine) {
       return json({ error: "key is set to another engine" }, 403);
+    }
+    if (!(await withinLimit(env.TOKEN_KEY_LIMIT, bucket))) {
+      return json({ error: "too many requests" }, 429);
     }
 
     // Asked before every conversation, so a switch in the admin page applies to the next one.

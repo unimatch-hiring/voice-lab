@@ -129,7 +129,7 @@ Cloudflare location and are approximate; the exact counting is `AddressGuard`'s.
 | `TOKEN_KEY_LIMIT` | hash of the key; minting and `/engine` counted apart | 6 |
 | `TOKEN_IP_LIMIT` | caller IP, checked before the key is looked up | 30 |
 
-Over the limit is `429`.
+Over the limit is `429`. The token limits are approximate (Cloudflare Rate Limiting counts asynchronously, so a burst can get one or two past six); the exact counter guards sign-in only.
 
 ## Local development
 
