@@ -16,15 +16,16 @@ wrangler deploy
 
 Never write secrets to files. Rotate `VIBE_TOKEN` regularly.
 
-⚠️ **The automatic deploy is currently broken**: the repository has
-`CLOUDFLARE_ACCOUNT_ID` but no `CLOUDFLARE_API_TOKEN`, so
-[`worker.yml`](../.github/workflows/worker.yml) fails on authentication before it reads
-any config. It last succeeded on 10.08.2026, so the token was there and is now gone.
+Merging a change under `worker/` to `main` deploys it: after CI passes,
+[`worker.yml`](../.github/workflows/worker.yml) (**Deploy Worker**) runs
+`wrangler deploy` with the repository secrets `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`. A commit that does not touch `worker/` still gives a green run, but
+its Deploy step is skipped, so a green run alone does not mean something shipped.
 
-Until a token with `Workers Scripts: Edit` is put back
-(`gh secret set CLOUDFLARE_API_TOKEN`), a Worker change has to be deployed by hand with
-`wrangler deploy`. Nothing is silently stale — the failed run is visible in Actions — but
-merging a `worker/` change does not ship it.
+If the token is ever missing, the step **Check the deploy credentials exist** fails with the
+fix in the run summary. Put a token with `Workers Scripts: Edit` back
+(`gh secret set CLOUDFLARE_API_TOKEN`) and re-run the workflow. Until then a change can be
+shipped by hand with `wrangler deploy`.
 
 ## Interview keys
 
