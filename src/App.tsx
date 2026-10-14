@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EventBus } from "./lib/events";
 import { AgentSession } from "./lib/pipeline/agentSession";
+import { Tutor } from "./lib/tutor/supervisor";
 import { createTransport } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
@@ -9,6 +10,9 @@ import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
+import { MistakeBoard } from "./scene/MistakeBoard";
+import { LevelLine } from "./scene/LevelLine";
+import { loadLesson, saveLesson } from "./lib/tutor/lessonStore";
 import { Mouth } from "./scene/Mouth";
 import "./scene/tokens.css";
 
@@ -58,6 +62,7 @@ export function App() {
   const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [talking, setTalking] = useState(false);
+  const [lessonReady, setLessonReady] = useState(false);
   /** Who ended the last conversation, so the transport row can say so. */
   const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
   // Detection knobs, adjustable between sessions from the settings panel.
@@ -98,6 +103,43 @@ export function App() {
     });
   }, [bus, config, recorder]);
 
+  // The tutor watches the same event stream the scene does and steers the running
+  // conversation through the session's context channel. It knows nothing about the
+  // pipeline, and the pipeline knows nothing about it.
+  //
+  // Built once and handed a channel that reads the current session from a ref, not the
+  // session itself: `session` is rebuilt whenever the token is edited, and a tutor
+  // rebuilt with it started from an empty log while the board kept its lines — the
+  // counter then disagreed with the list it was counting.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const tutor = useMemo(
+    () =>
+      new Tutor(
+        bus,
+        { sendContext: (text) => sessionRef.current.sendContext(text) },
+        (lesson) => void saveLesson(lesson),
+      ),
+    [bus],
+  );
+  useEffect(() => tutor.attach(), [tutor]);
+
+  // What the last visit left: the level, and the mistakes the board draws. Restored
+  // after `attach`, so the replayed mistakes have somebody listening.
+  useEffect(() => {
+    let alive = true;
+    loadLesson()
+      .then((stored) => {
+        if (alive) tutor.restore(stored);
+      })
+      .finally(() => {
+        if (alive) setLessonReady(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [tutor]);
+
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
   // mid-reply and leave the character frozen with its mouth open.
@@ -132,11 +174,15 @@ export function App() {
     }
     try {
       setEndedBy(null);
+      // A new conversation is a new lesson: the previous learner's Russian streak is
+      // not this one's.
+      tutor.reset();
       if (recording) {
         setSavedAs(null);
         recorder.start();
       }
-      await session.start();
+      await session.start(tutor.openingContext());
+      tutor.begin();
       setTalking(true);
     } catch (e) {
       setError(startFailureMessage(e));
@@ -199,13 +245,15 @@ export function App() {
               className="talk"
               data-talking={talking}
               onClick={toggleConversation}
-              disabled={config.offline}
+              disabled={config.offline || !lessonReady}
             >
               {talking ? "End conversation" : "Start conversation"}
             </button>
             <span className="hint">
               {config.offline
                 ? "Paste the access token above to start talking."
+                : !lessonReady
+                  ? "Loading your lesson."
                 : talking
                   ? "Listening. Just speak; pauses end your turn."
                   : endedBy === "agent"
@@ -228,6 +276,8 @@ export function App() {
             <div className="run-left">
               <Waterfall bus={bus} />
               <Transcript bus={bus} />
+              <LevelLine bus={bus} onReset={() => tutor.resetLevel()} />
+              <MistakeBoard bus={bus} onClear={() => tutor.clearMistakes()} />
             </div>
             <Mouth source={mouthSource} />
           </div>

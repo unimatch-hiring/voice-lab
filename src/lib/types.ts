@@ -39,4 +39,31 @@ export type PipelineEvent =
   // Input audio level, ~100 Hz. Emitted by capture with a live mic; offline there
   // are no such events and the scene shows 0.
   | { type: "audio-level"; rms: number; at: number }
-  | { type: "turn-end"; at: number; metrics: TurnMetrics };
+  | { type: "turn-end"; at: number; metrics: TurnMetrics }
+  // How a mistake reaches the screen. The tutor does not draw and the scene does not
+  // know the tutor exists, exactly as the pipeline and the scene do not know each
+  // other — a new fact travels as an event or not at all.
+  | {
+      type: "mistake";
+      /** What the recogniser heard. */
+      said: string;
+      /** The same sentence with every rule that fired applied. */
+      fixed: string;
+      /** Human-readable rule names, so the scene needs nothing from the tutor. */
+      labels: string[];
+      /** Mistakes recorded so far, so the counter cannot drift from the list. */
+      total: number;
+      at: number;
+    }
+  // The record was wiped by the learner. Carries no payload: there is nothing left to
+  // describe, and the board has only to empty itself.
+  | { type: "mistakes-cleared"; at: number }
+  // The learner's level, for the one control that can change it. `null` is a reset:
+  // the level is gone and the agent will ask again.
+  | {
+      type: "level";
+      level: string | null;
+      /** Whether the learner said so, or it was judged from their English. */
+      told: boolean;
+      at: number;
+    };

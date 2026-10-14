@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { AgentSession } from "./agentSession";
-import { SYSTEM_PROMPT } from "../persona";
+import { DIRECTIVE_MARKER, SYSTEM_PROMPT } from "../persona";
+import { steerDirective } from "../tutor/lesson";
 import { EventBus } from "../events";
 import type { PipelineEvent, TurnMetrics } from "../types";
 
@@ -8,6 +9,8 @@ import type { PipelineEvent, TurnMetrics } from "../types";
 const handlers: Record<string, (arg?: unknown) => void> = {};
 /** What the session asked the SDK for, so the handshake itself can be asserted on. */
 let startOptions: Record<string, unknown> = {};
+/** Contextual updates the SDK was handed, i.e. what the tutor managed to say. */
+let contextSent: string[] = [];
 
 vi.mock("@elevenlabs/client", () => ({
   Conversation: {
@@ -16,8 +19,10 @@ vi.mock("@elevenlabs/client", () => ({
       for (const [key, value] of Object.entries(opts)) {
         if (typeof value === "function") handlers[key] = value as () => void;
       }
+      contextSent = [];
       return {
         endSession: async () => {},
+        sendContextualUpdate: (text: string) => contextSent.push(text),
         getOutputVolume: () => 0,
         getOutputByteFrequencyData: () => new Uint8Array(1024),
       };
@@ -25,7 +30,7 @@ vi.mock("@elevenlabs/client", () => ({
   },
 }));
 
-async function harness() {
+async function harness(openingContext = "") {
   const bus = new EventBus();
   const events: PipelineEvent[] = [];
   bus.on((e) => events.push(e));
@@ -39,7 +44,7 @@ async function harness() {
     onEnded: () => {},
   });
 
-  await session.start();
+  await session.start(openingContext);
   return { session, events, turns };
 }
 
@@ -97,4 +102,33 @@ test("the role is sent with the handshake, not left to the agent's own prompt", 
     | { agent?: { prompt?: { prompt?: string } } }
     | undefined;
   expect(overrides?.agent?.prompt?.prompt).toBe(SYSTEM_PROMPT);
+});
+
+test("an instruction can be handed to a running conversation", async () => {
+  // The role travels in the handshake and cannot be changed afterwards, so this is
+  // the tutor's only way to steer a lesson that is already under way.
+  const { session } = await harness();
+
+  session.sendContext("[TUTOR DIRECTIVE] stay in English");
+
+  expect(contextSent).toEqual(["[TUTOR DIRECTIVE] stay in English"]);
+});
+
+test("an instruction after the conversation dropped is not sent anywhere", async () => {
+  // The handle is dropped on disconnect precisely so late calls go nowhere; without
+  // that this throws inside whatever happened to still be running.
+  const { session } = await harness();
+
+  handlers.onDisconnect?.({ reason: "agent" } as never);
+  expect(() => session.sendContext("[TUTOR DIRECTIVE] stay in English")).not.toThrow();
+  expect(contextSent).toEqual([]);
+});
+
+test("the prompt tells the agent what to do with the directives it will be sent", () => {
+  // The two halves of one contract. Without this, deleting the prompt's DIRECTIVES
+  // section left every test green while the agent began reading
+  // "[TUTOR DIRECTIVE] The learner just spoke Russian…" aloud to the learner.
+  expect(SYSTEM_PROMPT).toContain(DIRECTIVE_MARKER);
+  expect(SYSTEM_PROMPT, "and says not to speak them").toMatch(/[Nn]ever read it aloud/);
+  expect(steerDirective(1).startsWith(DIRECTIVE_MARKER), "same marker both ways").toBe(true);
 });

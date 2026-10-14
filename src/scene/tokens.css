@@ -771,3 +771,75 @@ body {
   color: var(--rack-ink);
   border-color: var(--rack-dim);
 }
+
+/* ── mistakes ──────────────────────────────────────────────────────────── */
+
+.mistakes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mistakes-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+/* `.spacer` is scoped per head in this sheet, so it needs its own rule here or the
+   count sits against the label instead of at the right edge. */
+.mistakes-head .spacer { flex: 1; }
+
+/* Fixed height, scrolling inside — same reasoning as the conversation above it: the
+   page must not grow as the list does. `resize: vertical` because a long list is
+   exactly the case where a reader wants more of it at once. */
+.mistakes-log {
+  margin: 0;
+  padding: 10px 12px;
+  height: 96px;
+  resize: vertical;
+  background: var(--rack-sunken);
+  border: 1px solid var(--rack-edge);
+  border-radius: 8px;
+  color: var(--rack-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.mistakes-log::placeholder {
+  color: var(--rack-dim);
+  /* The empty state is a sentence, not data, so it wraps rather than scrolling off. */
+  white-space: pre-wrap;
+}
+
+/* ── level ─────────────────────────────────────────────────────────────── */
+
+.level-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.level-line .spacer { flex: 1; }
+
+/* Lower case and not a readout: it is a caveat about the number beside it, and
+   shouting it would give it the same weight as the level itself. */
+.level-source {
+  text-transform: none;
+  letter-spacing: 0;
+}

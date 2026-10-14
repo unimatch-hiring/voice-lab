@@ -92,7 +92,25 @@ export class AgentSession {
     return this.sharpen.apply(spectrum);
   }
 
-  async start(): Promise<void> {
+  /**
+   * Hands the agent an instruction out of band: context it acts on, not a turn it
+   * answers and not a line it reads out. This is how the tutor steers a conversation
+   * that is already running — the role itself travels in the handshake and cannot be
+   * changed afterwards.
+   *
+   * Returns whether there was a live conversation to hand it to — which is all this
+   * can honestly report. The SDK takes the message and drops it with a console
+   * warning of its own when the room is mid-reconnect, and nothing acknowledges one
+   * that does arrive, so `true` means handed over and not heard.
+   */
+  sendContext(text: string): boolean {
+    if (!this.conversation) return false;
+    this.conversation.sendContextualUpdate(text);
+    return true;
+  }
+
+  /** `openingContext` joins the role in the handshake, before the agent can reply. */
+  async start(openingContext = ""): Promise<void> {
     if (this.running) return;
 
     const { token } = await this.deps.transport.agentToken();
@@ -102,7 +120,11 @@ export class AgentSession {
       conversationToken: token,
 
       // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      overrides: {
+        agent: {
+          prompt: { prompt: `${SYSTEM_PROMPT}${openingContext}` },
+        },
+      },
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
