@@ -13,15 +13,14 @@ AGENT_ID = "agent_6701kzf2723mf3dtp7ben1j5dczt"
 ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173"
 
 # Interview keys, one entry per issued key, expiring by KV's own TTL so nothing has
-# to sweep them. Without this binding the admin endpoints answer 404 and the
-# permanent VIBE_TOKEN keeps working on its own.
+# to sweep them. Every caller holds one of these; there is no permanent token.
 [[kv_namespaces]]
 binding = "KEYS"
 id = "5fc3e04365264ee897f5569ea3aafbbe"
 
-# Brute-force cost on sign-in, keyed by the address being signed into. Counts per
-# Cloudflare location and is permissive by design, so it raises the price of a guessing
-# script rather than capping it — the eight-digit code is what makes the attempt futile.
+# Rate limits count per Cloudflare location and are permissive by design: they raise the
+# price of a script rather than cap it. The exact counting lives in AddressGuard below.
+# Sign-in, keyed by the address being signed into.
 [[ratelimits]]
 name = "SIGNIN_LIMIT"
 namespace_id = "1001"
@@ -35,3 +34,45 @@ namespace_id = "1002"
 [ratelimits.simple]
 limit = 10
 period = 60
+
+# The same two, keyed by the caller's IP, so one machine cannot spread guesses over many
+# addresses. Namespace ids are account-wide: another Worker reusing one shares its counters.
+[[ratelimits]]
+name = "SIGNIN_IP_LIMIT"
+namespace_id = "4281"
+[ratelimits.simple]
+limit = 10
+period = 60
+
+[[ratelimits]]
+name = "VERIFY_IP_LIMIT"
+namespace_id = "4282"
+[ratelimits.simple]
+limit = 20
+period = 60
+
+# Token endpoints spend ElevenLabs and Deepgram minutes. A conversation needs one token, so
+# six a minute per key is generous for a person and cheap for a leaked key.
+[[ratelimits]]
+name = "TOKEN_KEY_LIMIT"
+namespace_id = "4283"
+[ratelimits.simple]
+limit = 6
+period = 60
+
+[[ratelimits]]
+name = "TOKEN_IP_LIMIT"
+namespace_id = "4284"
+[ratelimits.simple]
+limit = 30
+period = 60
+
+# One object per admin address: the live code, its tries, the daily ceiling and the alert
+# window, counted atomically — see guard.js.
+[[durable_objects.bindings]]
+name = "GUARD"
+class_name = "AddressGuard"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AddressGuard"]
