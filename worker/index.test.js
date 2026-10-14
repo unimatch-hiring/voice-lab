@@ -695,6 +695,18 @@ describe("a key reaches only its own engine", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("answers 403, not 429, to the wrong engine even when the key's budget is spent", async () => {
+    const fetchSpy = stubElevenLabs();
+    const limiter = fakeLimiter(1);
+    const e = env({ DEEPGRAM_API_KEY: "dg-secret", TOKEN_KEY_LIMIT: limiter });
+    const call = (path) => worker.fetch(req(path, { headers: { "x-vibe-token": "vibe_el" } }), e);
+    expect((await call("/agent/token")).status).toBe(200);
+    expect((await call("/deepgram-token")).status).toBe(403);
+    expect((await call("/deepgram-token")).status).toBe(403);
+    expect([...limiter.counts.values()], "the refused requests spent nothing").toEqual([1]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("will not mint an ElevenLabs token for a Deepgram key", async () => {
     const fetchSpy = stubElevenLabs();
     const r = await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_dg" } }), env());
