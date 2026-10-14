@@ -21,6 +21,17 @@ export interface Transport {
 
 type FetchLike = typeof fetch;
 
+/** The Worker answered, but not with 2xx: the status says whose fault it was. */
+export class WorkerError extends Error {
+  constructor(
+    readonly path: string,
+    readonly status: number,
+  ) {
+    super(`token-minter ${path} failed: ${status}`);
+    this.name = "WorkerError";
+  }
+}
+
 export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fetch): Transport {
   const post = async (path: string, body?: unknown): Promise<Response> => {
     const r = await fetchImpl(`${cfg.workerUrl}${path}`, {
@@ -28,7 +39,7 @@ export function createTransport(cfg: TransportConfig, fetchImpl: FetchLike = fet
       headers: { "content-type": "application/json", "x-vibe-token": cfg.vibeToken },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(`token-minter ${path} failed: ${r.status}`);
+    if (!r.ok) throw new WorkerError(path, r.status);
     return r;
   };
 

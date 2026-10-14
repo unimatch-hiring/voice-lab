@@ -3,7 +3,7 @@ import { EventBus } from "./lib/events";
 import { createSession } from "./lib/pipeline/createSession";
 import type { Engine, SessionDeps, VoiceSession } from "./lib/pipeline/session";
 import { BACKUP_ENGINE_NOTICE } from "./lib/engine";
-import { createTransport } from "./lib/transport";
+import { createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
@@ -18,7 +18,7 @@ import "./scene/tokens.css";
  * Turns a failed start into something the visitor can act on. The browser's own wording
  * for a denied microphone ("Permission denied") does not say which permission, or where.
  */
-export function startFailureMessage(e: unknown): string {
+export function startFailureMessage(e: unknown, engine: Engine = "elevenlabs"): string {
   const name = e instanceof DOMException ? e.name : "";
   const raw = e instanceof Error ? e.message : String(e);
 
@@ -27,6 +27,14 @@ export function startFailureMessage(e: unknown): string {
   }
   if (name === "NotFoundError") {
     return "No microphone found. Connect one and start again.";
+  }
+  // Past the microphone, the backup engine fails on our key or on a service it depends on:
+  // a Worker 502 or a dropped socket is not the visitor's token.
+  if (engine === "deepgram") {
+    if (e instanceof WorkerError && e.status === 401) {
+      return "The access token was not accepted or has expired. Open settings and paste it again.";
+    }
+    return "Backup engine is unavailable right now, try again later.";
   }
   if (/401|403|token/i.test(raw)) {
     return "The access token was rejected. Open settings and paste it again.";
@@ -93,6 +101,8 @@ export function App() {
   }, [config, transport]);
 
   const sessionRef = useRef<VoiceSession | null>(null);
+  /** The engine the last start attempt used, so its failure is worded for that engine. */
+  const engineRef = useRef<Engine>("elevenlabs");
 
   const sessionDeps = useMemo((): SessionDeps => {
     return {
@@ -160,12 +170,13 @@ export function App() {
       // An old Worker without the engine route means the default engine, not a failure.
       const current = await transport.engine().catch(() => "elevenlabs" as const);
       setEngine(current);
+      engineRef.current = current;
       const session = createSession(current, sessionDeps);
       sessionRef.current = session;
       await session.start();
       setTalking(true);
     } catch (e) {
-      setError(startFailureMessage(e));
+      setError(startFailureMessage(e, engineRef.current));
       setTalking(false);
     }
   };
