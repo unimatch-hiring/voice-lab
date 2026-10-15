@@ -1,0 +1,72 @@
+name: preview-pr-cleanup
+
+# Drops a fork's preview when its pull request closes. pull_request_target, because a
+# fork's own `pull_request` run gets a read-only token and could not push the removal.
+# What makes that trigger dangerous is checking out and running the pull request's code
+# with the write token; this job checks out only gh-pages and deletes one directory whose
+# name comes from GitHub's event, not from the fork.
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions: {}
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  remove:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      deployments: write
+    steps:
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: site
+          # Kept on purpose: this checkout is the one that pushes.
+          persist-credentials: true
+        continue-on-error: true
+
+      - name: Drop the preview
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [ -d site/.git ] || { echo "nothing published yet"; exit 0; }
+          cd site
+          [ -d "pr-preview/pr-$PR" ] || { echo "no preview for pr-$PR"; exit 0; }
+          rm -rf "pr-preview/pr-$PR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Drop preview pr-$PR"
+          git push -q origin HEAD:gh-pages
+
+      - name: Retire the link
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          for dep in $(gh api "repos/$REPO/deployments?environment=fork-preview&per_page=100" \
+              --jq ".[] | select(.payload.pr == $PR) | .id"); do
+            gh api -X POST "repos/$REPO/deployments/$dep/statuses" -f state=inactive --silent || true
+          done
+
+          marker='<!-- fork-preview -->'
+          existing=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)
+          if [ -n "$existing" ]; then
+            body=$(printf '%s\n\nThe preview was removed when this pull request closed. Reopening it builds a new one.' "$marker")
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" --silent
+          fi

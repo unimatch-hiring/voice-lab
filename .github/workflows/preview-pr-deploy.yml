@@ -1,0 +1,197 @@
+name: preview-pr-deploy
+
+# Second half of a fork's preview. workflow_run always runs this file as it is on main,
+# never the pull request's copy, so this is where the write token lives. It runs no
+# project code: no install, no build, no script from the artifact. The artifact was made
+# by fork code and is read as untrusted data — its claims are checked against GitHub.
+on:
+  workflow_run:
+    workflows: [preview-pr-build]
+    types: [completed]
+
+permissions: {}
+
+# Shared with deploy.yml, preview.yml and preview-pr-cleanup.yml: all of them push gh-pages.
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+# Fork previews past this are dropped, oldest first. Counted apart from branch previews:
+# each mechanism prunes only its own `pr-<N>` or branch directories, never the other's.
+env:
+  KEEP: 4
+
+jobs:
+  publish:
+    # A same-repository branch is preview.yml's job; this one is only for forks.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      deployments: write
+      actions: read
+    steps:
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      # Main's own helper, not the pull request's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tools
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      # workflow_run.pull_requests is empty for a fork, so the pull request is looked up by
+      # its head and must still point at the commit that was built: a newer push has its
+      # own run coming.
+      - name: Find the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected head sha"; exit 1; }
+          numbers=$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="${HEAD_REPO%%/*}:$HEAD_BRANCH" -f per_page=100 \
+            --jq '.[] | select(.head.sha == env.HEAD_SHA and .head.repo.full_name == env.HEAD_REPO) | .number')
+          count=$(printf '%s' "$numbers" | grep -c . || true)
+          if [ "$count" != 1 ]; then
+            echo "::notice::no single open pull request at $HEAD_REPO@${HEAD_SHA:0:7} ($count found), nothing to publish"
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "number=$numbers" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and check the artifact
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          PR: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          read -r id size < <(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '[.artifacts[] | select(.name == "fork-preview" and (.expired | not))] | if length == 1 then "\(.[0].id) \(.[0].size_in_bytes)" else "none 0" end')
+          [ "$id" != none ] || { echo "expected exactly one fork-preview artifact"; exit 1; }
+          [ "$size" -le 104857600 ] || { echo "artifact is $size bytes"; exit 1; }
+          gh api "repos/$REPO/actions/artifacts/$id/zip" > "$RUNNER_TEMP/artifact.zip"
+          python3 tools/.github/scripts/unpack-artifact.py "$RUNNER_TEMP/artifact.zip" "$RUNNER_TEMP/preview"
+
+          claimed_pr=$(head -c 32 "$RUNNER_TEMP/preview/pr" | tr -d '\n')
+          claimed_sha=$(head -c 64 "$RUNNER_TEMP/preview/sha" | tr -d '\n')
+          [[ "$claimed_pr" =~ ^[0-9]+$ ]] || { echo "artifact pr is not a number"; exit 1; }
+          [ "$claimed_pr" = "$PR" ] || { echo "artifact says #$claimed_pr, GitHub says #$PR"; exit 1; }
+          [ "$claimed_sha" = "$HEAD_SHA" ] || { echo "artifact was built from another commit"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.pr.outputs.number != ''
+        with:
+          ref: gh-pages
+          path: site
+          # Kept on purpose: this checkout is the one that pushes.
+          persist-credentials: true
+        continue-on-error: true
+
+      - name: Publish the preview
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -d site/.git ]; then
+            rm -rf site
+            mkdir site
+            git -C site init -q -b gh-pages
+            git -C site remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+            touch site/.nojekyll
+          fi
+
+          cd site
+          rm -rf "pr-preview/pr-$PR"
+          mkdir -p "pr-preview/pr-$PR"
+          cp -R "$RUNNER_TEMP/preview/site/." "pr-preview/pr-$PR/"
+
+          # A closed pull request normally loses its preview in preview-pr-cleanup, but a
+          # pending run in the gh-pages group can be superseded, so this sweeps up after it.
+          for dir in pr-preview/pr-*/; do
+            [ -d "$dir" ] || continue
+            n=${dir#pr-preview/pr-}; n=${n%/}
+            if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" = "$PR" ]; then continue; fi
+            state=$(gh api "repos/$REPO/pulls/$n" --jq .state 2>/dev/null || echo unknown)
+            if [ "$state" = closed ]; then
+              echo "dropping $dir (closed)"
+              rm -rf "$dir"
+            fi
+          done
+
+          for dir in pr-preview/pr-*/; do
+            if ! [[ "$dir" =~ ^pr-preview/pr-[0-9]+/$ ]]; then continue; fi
+            printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$dir" 2>/dev/null || echo 0)" "$dir"
+          done | sort -rn | tail -n "+$((KEEP + 1))" | cut -f2 | while read -r old; do
+            if [ "$old" != "pr-preview/pr-$PR/" ]; then
+              echo "dropping $old"
+              rm -rf "$old"
+            fi
+          done
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --quiet --cached && { echo "preview unchanged"; exit 0; }
+          git commit -q -m "Preview pr-$PR at ${HEAD_SHA:0:7}"
+          git push -q origin HEAD:gh-pages
+
+      - name: Leave the link on the pull request
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ github.event.repository.name }}
+          PR: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          url="https://${OWNER,,}.github.io/$NAME/pr-preview/pr-$PR/"
+          echo "### Preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+
+          # The marker alone is not enough: anyone can post a comment that starts with it.
+          marker='<!-- fork-preview -->'
+          body=$(printf '%s\n\nPreview of this pull request: %s\n\nBuilt from %s. Paste an access key on the page to talk to it.' \
+            "$marker" "$url" "${HEAD_SHA:0:7}")
+          existing=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" --silent
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" --silent
+          fi
+
+          # The deployment is what shows "View deployment" on the pull request itself.
+          # One environment for all forks, so auto_inactive is off: otherwise each new
+          # preview would mark every other pull request's preview inactive.
+          for old in $(gh api "repos/$REPO/deployments?environment=fork-preview&per_page=100" \
+              --jq ".[] | select(.payload.pr == $PR) | .id"); do
+            gh api -X POST "repos/$REPO/deployments/$old/statuses" -f state=inactive --silent || true
+          done
+          dep=$(jq -n --arg sha "$HEAD_SHA" --argjson pr "$PR" \
+            '{ref: $sha, environment: "fork-preview", auto_merge: false, required_contexts: [],
+              transient_environment: true, payload: {pr: $pr}, description: "Preview of #\($pr)"}' \
+            | gh api -X POST "repos/$REPO/deployments" --input - --jq .id)
+          jq -n --arg url "$url" '{state: "success", environment_url: $url, auto_inactive: false}' \
+            | gh api -X POST "repos/$REPO/deployments/$dep/statuses" --input - --silent

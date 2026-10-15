@@ -3,7 +3,8 @@ name: Branch preview
 # A branch gets its own URL under the published site, so a change can be looked at
 # without merging it. Triggered by the push, not by a pull request: a fork has no write
 # token, and handing one to fork code is the mistake `pull_request_target` is famous for.
-# So previews cover branches pushed to this repository — ours, and a collaborator's.
+# So this covers branches pushed to this repository; forks get theirs from the split
+# preview-pr-build / preview-pr-deploy pair, under `pr-<N>`.
 on:
   push:
     branches-ignore: [main, gh-pages]
@@ -46,6 +47,8 @@ jobs:
         run: |
           slug=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
           [ -n "$slug" ] || slug="branch"
+          # `pr-<N>` belongs to fork previews.
+          if [[ "$slug" =~ ^pr-[0-9]+$ ]]; then slug="branch-$slug"; fi
           echo "value=$slug" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -119,10 +122,12 @@ jobs:
           cp -R ../dist/. "pr-preview/$SLUG/"
 
           # Sorted by the commit that last touched each one, so the ones still being
-          # worked on stay and the forgotten ones go.
+          # worked on stay and the forgotten ones go. Fork previews (`pr-<N>`) are counted
+          # and pruned by preview-pr-deploy, so they are left alone here.
           if [ -d pr-preview ]; then
             for dir in pr-preview/*/; do
               [ -d "$dir" ] || continue
+              if [[ "$dir" =~ ^pr-preview/pr-[0-9]+/$ ]]; then continue; fi
               printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$dir" 2>/dev/null || echo 0)" "$dir"
             done | sort -rn | tail -n "+$((KEEP + 1))" | cut -f2 | while read -r old; do
               echo "dropping $old"
@@ -187,6 +192,7 @@ jobs:
         run: |
           set -euo pipefail
           slug=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+          if [[ "$slug" =~ ^pr-[0-9]+$ ]]; then slug="branch-$slug"; fi
           [ -d site/.git ] || { echo "nothing published yet"; exit 0; }
           cd site
           [ -d "pr-preview/$slug" ] || { echo "no preview for $slug"; exit 0; }

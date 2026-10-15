@@ -1,0 +1,64 @@
+name: preview-pr-build
+
+# First half of a fork's preview. This job runs the pull request's own code, so it gets
+# nothing to write with: a read-only token, no secrets, and its whole output is a build
+# handed to preview-pr-deploy, which treats it as untrusted data. Branches of this
+# repository are covered by preview.yml instead.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-pr-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No `cache: npm`: a cache written by a fork's run is not something to hand on.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - run: npm ci --ignore-scripts
+
+      - name: Build
+        env:
+          VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
+          BASE_PATH: /${{ github.event.repository.name }}/pr-preview/pr-${{ github.event.pull_request.number }}/
+        run: |
+          # An empty variable would override config.ts's default with "" and leave the
+          # page offline; unset, the build falls back to the deployed Worker.
+          [ -n "$VITE_WORKER_URL" ] || unset VITE_WORKER_URL
+          npm run build
+
+      # The deploy side re-derives both from GitHub and only accepts a match, so these are
+      # a claim to check, not an instruction.
+      - name: Package
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p out
+          mv dist out/site
+          printf '%s\n' "$PR" > out/pr
+          printf '%s\n' "$SHA" > out/sha
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fork-preview
+          path: out
+          retention-days: 1
