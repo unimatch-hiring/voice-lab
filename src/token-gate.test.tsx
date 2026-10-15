@@ -201,3 +201,22 @@ describe("the backup engine notice", () => {
     expect(screen.queryByText(/backup engine/i)).toBeNull();
   });
 });
+
+test("a second press while a start is under way does not start a second session", async () => {
+  stored = "vibe_test";
+  const pending: ((r: Response) => void)[] = [];
+  vi.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)));
+  render(<App />);
+  const talk = await screen.findByRole("button", { name: /start conversation/i });
+  const asks = () => vi.mocked(globalThis.fetch).mock.calls.length;
+
+  fireEvent.click(talk);
+  await waitFor(() => expect(talk.textContent).toBe("Starting…"));
+  const afterFirst = asks();
+  fireEvent.click(talk);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(asks(), "the second press starts nothing").toBe(afterFirst);
+
+  for (const answer of pending) answer(new Response("{}", { status: 404 }));
+  await screen.findByRole("button", { name: /end conversation/i });
+});

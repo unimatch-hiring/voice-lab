@@ -68,6 +68,7 @@ export function App() {
   const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [talking, setTalking] = useState(false);
+  const [starting, setStarting] = useState(false);
   /** Who ended the last conversation, so the transport row can say so. */
   const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
   // Detection knobs, adjustable between sessions from the settings panel.
@@ -161,6 +162,9 @@ export function App() {
       if (recording) saveRecording();
       return;
     }
+    // A start can take seconds; a second press would open a second session that nothing
+    // can stop.
+    setStarting(true);
     try {
       setEndedBy(null);
       if (recording) {
@@ -178,6 +182,8 @@ export function App() {
     } catch (e) {
       setError(startFailureMessage(e, engineRef.current));
       setTalking(false);
+    } finally {
+      setStarting(false);
     }
   };
 
@@ -243,9 +249,9 @@ export function App() {
               className="talk"
               data-talking={talking}
               onClick={toggleConversation}
-              disabled={config.offline}
+              disabled={config.offline || starting}
             >
-              {talking ? "End conversation" : "Start conversation"}
+              {starting ? "Starting…" : talking ? "End conversation" : "Start conversation"}
             </button>
             <span className="hint">
               {config.offline

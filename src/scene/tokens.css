@@ -427,6 +427,23 @@ body {
   color: var(--rack-dim);
 }
 
+.settings select {
+  width: 100%;
+  font: 13px/1.3 var(--sans);
+  color: var(--rack-ink);
+  background: var(--rack);
+  border: 1px solid var(--rack-edge);
+  border-radius: 7px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.settings select:focus {
+  border-color: var(--running);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 22%, transparent);
+}
+
 /* Range inputs get the accent and a sunken track, so they read as instrument
    controls rather than default browser widgets. */
 .settings input[type="range"] {

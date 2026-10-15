@@ -144,3 +144,6 @@ A key for local runs goes into the local KV:
 `wrangler kv key put --binding KEYS --local "key:vibe_dev" '{"engine":"deepgram","expiresAt":<ms>}'`.
 
 `wrangler dev` → http://localhost:8787
+
+Or `npm run dev:local` from the repo root, which puts an interview key into the local KV
+and serves the page's training questions from this Worker ([deploy](../docs/deploy.md)).

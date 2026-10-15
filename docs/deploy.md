@@ -69,3 +69,11 @@ A preview needs a write token, so it only covers branches pushed **here**. A for
 branch builds in CI like any other, but nothing publishes it — handing a write token to
 fork code is the hole `pull_request_target` is known for. Someone outside the
 organisation gets a preview by being added to it, or not at all.
+
+## Running the coach locally
+
+`npm run dev:local` runs the coach locally with an interview key, `VIBE_TOKEN=vibe_...` in
+`worker/.dev.vars`: it puts that key into the local KV, runs the Worker on :8787 and the
+dev server with the key filled in. The dev server proxies `/voice-lab/worker/questions` to
+the local Worker and everything else to the deployed one, so the session is minted as on
+the published page while the questions come from code that may not be deployed yet.
