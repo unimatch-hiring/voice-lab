@@ -47,6 +47,8 @@ export class AgentSession implements VoiceSession {
    * bench's readout described a signal nothing was using.
    */
   private sharpen = new Desmoother();
+  /** The model already holds this under the knowledge context id; sending it again costs tokens for nothing. */
+  private sentMaterial: string | null = null;
 
   constructor(private deps: AgentSessionDeps) {}
 
@@ -130,6 +132,12 @@ export class AgentSession implements VoiceSession {
             type: "stt-result",
             result: { text: message, words: [] },
           });
+          // One context id: each update replaces the last in the model's view instead of piling up.
+          const material = this.deps.knowledgeFor?.(message);
+          if (material && material !== this.sentMaterial) {
+            this.sentMaterial = material;
+            this.conversation?.sendContextualUpdate(material, { contextId: "knowledge" });
+          }
           return;
         }
 
