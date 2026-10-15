@@ -128,8 +128,10 @@ jobs:
             for dir in pr-preview/*/; do
               [ -d "$dir" ] || continue
               if [[ "$dir" =~ ^pr-preview/pr-[0-9]+/$ ]]; then continue; fi
+              # Not committed yet, so it has no date and would sort as the oldest.
+              if [ "$dir" = "pr-preview/$SLUG/" ]; then continue; fi
               printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$dir" 2>/dev/null || echo 0)" "$dir"
-            done | sort -rn | tail -n "+$((KEEP + 1))" | cut -f2 | while read -r old; do
+            done | sort -rn | tail -n "+$KEEP" | cut -f2 | while read -r old; do
               echo "dropping $old"
               rm -rf "$old"
             done
