@@ -1,11 +1,16 @@
 import type { EventBus } from "../events";
+import type { Role } from "../persona";
 import type { Transport } from "../transport";
 import type { TurnMetrics } from "../types";
 
 /** Which managed service runs the conversation. Chosen per key, in the admin page. */
 export type Engine = "elevenlabs" | "deepgram";
 
-export interface SessionDeps {
+/**
+ * The role is read at start; a live conversation keeps the one it opened with. Deepgram
+ * reads only its prompt: the model, language and recogniser hints are ElevenLabs settings.
+ */
+export interface SessionDeps extends Role {
   bus: EventBus;
   transport: Transport;
   /**

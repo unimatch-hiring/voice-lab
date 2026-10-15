@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { DEEPGRAM_AGENT_URL, DeepgramSession, type ClientFunction } from "./deepgramSession";
 import type { DeepgramAudio } from "./deepgramAudio";
-import { SYSTEM_PROMPT } from "../persona";
 import { EventBus } from "../events";
 import type { PipelineEvent, TurnMetrics } from "../types";
 
@@ -102,9 +101,10 @@ afterEach(() => {
 
 interface HarnessOptions {
   functions?: ClientFunction[];
+  prompt?: string;
 }
 
-async function harness({ functions }: HarnessOptions = {}) {
+async function harness({ functions, prompt = "unused" }: HarnessOptions = {}) {
   const bus = new EventBus();
   const events: PipelineEvent[] = [];
   bus.on((e) => events.push(e));
@@ -119,6 +119,7 @@ async function harness({ functions }: HarnessOptions = {}) {
     onEnded: (reason, message) => ended.push({ reason, message }),
     functions,
     audio: () => audio as unknown as DeepgramAudio,
+    prompt,
   });
 
   const started = session.start();
@@ -157,6 +158,7 @@ test("sends Settings only after Welcome, and nothing before it", async () => {
     onTurn: () => {},
     onEnded: () => {},
     audio: () => audio as unknown as DeepgramAudio,
+    prompt: "unused",
   });
   void session.start();
   await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
@@ -167,13 +169,13 @@ test("sends Settings only after Welcome, and nothing before it", async () => {
   expect(socket.json()[0].type).toBe("Settings");
 });
 
-test("Settings carry the role, the client functions and English-only managed models", async () => {
-  const { socket } = await harness({ functions: [clock] });
+test("Settings carry the prompt the session was given, the client functions and English-only managed models", async () => {
+  const { socket } = await harness({ functions: [clock], prompt: "theme for this start" });
 
   const settings = socket.json().find((m) => m.type === "Settings");
   expect(settings.audio.input).toEqual({ encoding: "linear16", sample_rate: 48000 });
   expect(settings.audio.output.sample_rate).toBe(24000);
-  expect(settings.agent.think.prompt).toBe(SYSTEM_PROMPT);
+  expect(settings.agent.think.prompt).toBe("theme for this start");
   expect(settings.agent.think.provider.type, "managed LLM, no key of ours").toBe("open_ai");
   expect(settings.agent.think.endpoint, "no endpoint means Deepgram-managed").toBeUndefined();
   expect(settings.agent.think.functions).toEqual([
@@ -192,6 +194,7 @@ test("microphone audio waits for SettingsApplied", async () => {
     onTurn: () => {},
     onEnded: () => {},
     audio: () => audio as unknown as DeepgramAudio,
+    prompt: "unused",
   });
   const started = session.start();
   await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
@@ -402,6 +405,7 @@ test("a socket closed during the handshake fails start and releases the micropho
     onTurn: () => {},
     onEnded: () => {},
     audio: () => audio as unknown as DeepgramAudio,
+    prompt: "unused",
   });
   const started = session.start();
   await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
@@ -422,6 +426,7 @@ test("a denied microphone fails before a token is spent", async () => {
     onTurn: () => {},
     onEnded: () => {},
     audio: () => audio as unknown as DeepgramAudio,
+    prompt: "unused",
   });
 
   await expect(session.start()).rejects.toThrow(/denied/);

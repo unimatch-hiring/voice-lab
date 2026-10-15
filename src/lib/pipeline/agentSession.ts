@@ -1,6 +1,5 @@
 import { Conversation } from "@elevenlabs/client";
 import { Desmoother } from "../mouthLevel";
-import { SYSTEM_PROMPT } from "../persona";
 import type { StageName, TurnMetrics } from "../types";
 import type { SessionDeps, VoiceSession } from "./session";
 
@@ -92,8 +91,15 @@ export class AgentSession implements VoiceSession {
     this.conversation = await Conversation.startSession({
       conversationToken: token,
 
-      // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      // The role travels with the handshake: the server applies it only at start. An agent
+      // that does not allow the model or language override drops the call, so unset means unsent.
+      overrides: {
+        agent: {
+          prompt: { prompt: this.deps.prompt, ...(this.deps.llm ? { llm: this.deps.llm } : {}) },
+          ...(this.deps.language ? { language: this.deps.language } : {}),
+        },
+        ...(this.deps.asrKeywords ? { asr: { keywords: this.deps.asrKeywords } } : {}),
+      },
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
