@@ -43,8 +43,12 @@ git push -u origin my-branch
 
 The link arrives on its own: as a comment on the pull request, as a deployment on the
 branch, and in the run's summary. Four previews live at once, and deleting the branch
-removes its own. Details, including why previews do not cover forks:
-[docs/deploy.md](docs/deploy.md).
+removes its own.
+
+A pull request from a fork gets one too, at `…/pr-preview/pr-<N>/`, linked from a comment
+on the pull request and removed when it closes. The fork's code is built without any
+write access, and a separate job on `main` publishes the result as untrusted files. How
+and why that is safe: [docs/deploy.md](docs/deploy.md#fork-previews).
 
 ## How it fits together
 
