@@ -5,7 +5,7 @@ name: preview-pr-deploy
 # project code: no install, no build, no script from the artifact. The artifact was made
 # by fork code and is read as untrusted data — its claims are checked against GitHub.
 on:
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] -- runs no PR code, artifact checked, see above
     workflows: [preview-pr-build]
     types: [completed]
 

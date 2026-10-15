@@ -6,7 +6,7 @@ name: preview-pr-cleanup
 # with the write token; this job checks out only gh-pages and deletes one directory whose
 # name comes from GitHub's event, not from the fork.
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] -- no checkout of the PR, see above
     types: [closed]
 
 permissions: {}
