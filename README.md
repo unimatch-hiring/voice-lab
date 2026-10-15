@@ -64,3 +64,4 @@ More detail, by area: [docs/](docs/). Working on the code: [CLAUDE.md](./CLAUDE.
 ## License
 
 MIT.
+<!-- preview smoke 2026-10-15T22:30:02Z -->
