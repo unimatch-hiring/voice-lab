@@ -3,6 +3,8 @@ import {
   clientIp, withinLimit, sha256,
 } from "./signin.js";
 
+import { findQuestions, POOLS, SKILLS } from "./questions.js";
+
 export { AddressGuard } from "./guard.js";
 
 /**
@@ -224,7 +226,8 @@ export default {
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-    if (path !== "/engine" && !Object.hasOwn(ENDPOINT_ENGINE, path)) return json({ error: "not found" }, 404);
+    const keyed = path === "/engine" || path === "/questions" || Object.hasOwn(ENDPOINT_ENGINE, path);
+    if (!keyed) return json({ error: "not found" }, 404);
 
     // The address limit comes first so guessing keys costs a stranger as much as using one.
     if (!(await withinLimit(env.TOKEN_IP_LIMIT, clientIp(req)))) {
@@ -234,7 +237,8 @@ export default {
     const who = await caller(token, env);
     if (!who) return json({ error: "nope" }, 401);
     // Hashed so the limiter never holds a live credential; minting shares one budget.
-    const bucket = `${path === "/engine" ? "engine" : "mint"}:${await sha256(token)}`;
+    const kind = path === "/engine" || path === "/questions" ? path.slice(1) : "mint";
+    const bucket = `${kind}:${await sha256(token)}`;
     // Before the key's budget, so a request the key could never make does not spend it.
     if (ENDPOINT_ENGINE[path] && ENDPOINT_ENGINE[path] !== who.engine) {
       return json({ error: "key is set to another engine" }, 403);
@@ -245,6 +249,20 @@ export default {
 
     // Asked before every conversation, so a switch in the admin page applies to the next one.
     if (path === "/engine") return json({ engine: who.engine });
+
+    if (path === "/questions") {
+      const asked = await req.json().catch(() => ({}));
+      if (!Object.hasOwn(POOLS, asked?.audience)) return json({ error: "unknown audience" }, 400);
+      const skills = (Array.isArray(asked.skills) ? asked.skills : [])
+        .slice(0, Object.keys(SKILLS).length)
+        .map((skill) => (Object.hasOwn(SKILLS, skill) ? skill : "any"));
+      try {
+        // No fit is a null in its place, never a 404: that would read the same as a Worker without the route.
+        return json(await findQuestions({ skills, audience: asked.audience }));
+      } catch {
+        return json({ error: "question source failed" }, 502);
+      }
+    }
 
     // Session token for ElevenLabs Agents: short-lived and scoped to one conversation, so
     // it can safely reach the browser. The API key never leaves the Worker.

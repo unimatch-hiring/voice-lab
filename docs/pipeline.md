@@ -64,6 +64,14 @@ role it opened with, so switching roles means a new session. And the agent must 
 override: with it disallowed the server closes the connection instead of ignoring the
 field, which reaches the page as a dropped conversation rather than an error about prompts.
 
+The coach's knowledge base is searched in the page, not on the agent, so it needs no access
+to the ElevenLabs account. After each thing the person says, the best sections go to the
+agent with `sendContextualUpdate` under the one context id `knowledge`, each replacing the
+last, and the same material is not sent twice in a row. The user transcript arrives after
+the server has started its reply, so the material informs the turns after those words,
+not the reply to them. Deepgram ignores it. What goes into the base and how it is ranked:
+[knowledge](knowledge.md).
+
 ## Backup engine: Deepgram
 
 When ElevenLabs is down, a key can be switched to [Deepgram's Voice Agent

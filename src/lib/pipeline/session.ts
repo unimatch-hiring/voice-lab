@@ -8,6 +8,12 @@ export type Engine = "elevenlabs" | "deepgram";
 export interface SessionDeps {
   bus: EventBus;
   transport: Transport;
+  /**
+   * Material for what the person just said, or null. ElevenLabs gets it as a contextual
+   * update, which lands after the server has started the reply to those words, so it
+   * informs the turns after. Deepgram ignores it.
+   */
+  knowledgeFor?: (words: string) => string | null;
   /** Called when a turn completes, with what each stage cost. */
   onTurn: (metrics: TurnMetrics) => void;
   /**

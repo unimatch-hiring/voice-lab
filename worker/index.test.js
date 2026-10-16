@@ -176,6 +176,58 @@ describe("minting a session token", () => {
   });
 });
 
+describe("drawing training questions", () => {
+  const page = (question) =>
+    `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify([question])}\n`)}])</script>`;
+  const stubPack = (status = 200) =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          page({ id: 7, number: 1, text: "Назовите ИКСА.", answer: "Плот", comment: "", complexity: [] }),
+          { status },
+        ),
+    );
+  const draw = (body, headers = { "x-vibe-token": "vibe_el" }, e = env()) =>
+    worker.fetch(req("/questions", { headers, body }), e);
+
+  it("hands a key holder on either engine one question per skill, null where none fits", async () => {
+    stubPack();
+    for (const token of ["vibe_el", "vibe_dg"]) {
+      const r = await draw({ skills: ["replacement", "homogeneous"], audience: "school" }, { "x-vibe-token": token });
+      expect(r.status, token).toBe(200);
+      const [replacement, homogeneous] = await r.json();
+      expect(replacement).toMatchObject({ id: 7, answer: "Плот" });
+      expect(homogeneous, "a 404 would look like a Worker without the route").toBeNull();
+    }
+  });
+
+  it("draws at most one question per skill it knows, and never the same question twice", async () => {
+    stubPack();
+    const r = await draw({ skills: ["any", "chess", "any", "any", "any"], audience: "school" });
+    expect(await r.json()).toEqual([expect.objectContaining({ id: 7 }), null, null]);
+  });
+
+  it("refuses without a live key before touching the site", async () => {
+    const fetchSpy = stubPack();
+    const r = await draw({ skills: ["any"], audience: "school" }, { "x-vibe-token": "vibe_gone" });
+    expect(r.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("counts against its own per-key budget, not the one for minting", async () => {
+    stubPack();
+    const limiter = fakeLimiter(10);
+    await draw({ skills: ["any"], audience: "school" }, undefined, env({ TOKEN_KEY_LIMIT: limiter }));
+    expect([...limiter.counts.keys()]).toEqual([`questions:${await sha256("vibe_el")}`]);
+  });
+
+  it("tells an unknown audience from a failing site", async () => {
+    stubPack(429);
+    expect((await draw({ skills: ["any"], audience: "toString" })).status).toBe(400);
+    expect((await draw({ skills: ["any"], audience: "school" })).status).toBe(502);
+  });
+});
+
 /** Deepgram's grant endpoint; records how it was called. */
 function stubDeepgram(status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue(

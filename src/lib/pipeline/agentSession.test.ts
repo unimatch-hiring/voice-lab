@@ -8,6 +8,7 @@ import type { PipelineEvent, TurnMetrics } from "../types";
 const handlers: Record<string, (arg?: unknown) => void> = {};
 /** What the session asked the SDK for, so the handshake itself can be asserted on. */
 let startOptions: Record<string, unknown> = {};
+const contextualUpdates: [string, unknown][] = [];
 
 vi.mock("@elevenlabs/client", () => ({
   Conversation: {
@@ -17,6 +18,7 @@ vi.mock("@elevenlabs/client", () => ({
         if (typeof value === "function") handlers[key] = value as () => void;
       }
       return {
+        sendContextualUpdate: (text: string, options: unknown) => contextualUpdates.push([text, options]),
         endSession: async () => {},
         getOutputVolume: () => 0,
         getOutputByteFrequencyData: () => new Uint8Array(1024),
@@ -97,4 +99,46 @@ test("the role is sent with the handshake, not left to the agent's own prompt", 
     | { agent?: { prompt?: { prompt?: string } } }
     | undefined;
   expect(overrides?.agent?.prompt?.prompt).toBe(SYSTEM_PROMPT);
+});
+
+test("knowledge for the person's words goes to the agent as one replaceable contextual update", async () => {
+  contextualUpdates.length = 0;
+  const knowledgeFor = vi.fn((words: string) => (words.includes("фальстарт") ? "## Брейн-ринг: фальстарт" : null));
+  const session = new AgentSession({
+    bus: new EventBus(),
+    transport: { agentToken: async () => ({ token: "t", agentId: "a" }) } as never,
+    onTurn: () => {},
+    onEnded: () => {},
+    knowledgeFor,
+  });
+  await session.start();
+
+  handlers.onMessage?.({ message: "Что такое фальстарт?", source: "user" } as never);
+  handlers.onMessage?.({ message: "Привет", source: "user" } as never);
+  handlers.onMessage?.({ message: "Фальстарт — это ответ до сигнала.", source: "ai" } as never);
+
+  expect(knowledgeFor.mock.calls.map((c) => c[0]), "only the person's words are searched").toEqual([
+    "Что такое фальстарт?",
+    "Привет",
+  ]);
+  expect(contextualUpdates).toEqual([["## Брейн-ринг: фальстарт", { contextId: "knowledge" }]]);
+});
+
+test("the same material is not sent again while the model still holds it", async () => {
+  contextualUpdates.length = 0;
+  const knowledgeFor = (words: string) => (words.includes("фальстарт") ? "## фальстарт" : "## засветка");
+  const session = new AgentSession({
+    bus: new EventBus(),
+    transport: { agentToken: async () => ({ token: "t", agentId: "a" }) } as never,
+    onTurn: () => {},
+    onEnded: () => {},
+    knowledgeFor,
+  });
+  await session.start();
+
+  for (const message of ["Что такое фальстарт?", "А штраф за фальстарт?", "А засветка?", "Снова про фальстарт"]) {
+    handlers.onMessage?.({ message, source: "user" } as never);
+  }
+
+  expect(contextualUpdates.map(([text]) => text)).toEqual(["## фальстарт", "## засветка", "## фальстарт"]);
 });

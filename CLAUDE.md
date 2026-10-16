@@ -41,6 +41,7 @@ Read the doc for the area you are touching before you touch it.
 | [docs/pipeline.md](docs/pipeline.md) | stage mapping, turn boundaries, why not our own pipeline |
 | [docs/mouth.md](docs/mouth.md) | lip sync: amplitude source, invariants, sprites |
 | [docs/deploy.md](docs/deploy.md) | Pages, Worker, secrets |
+| [docs/knowledge.md](docs/knowledge.md) | the coach's knowledge base: scope, markup, search |
 
 ## Non-negotiable
 
