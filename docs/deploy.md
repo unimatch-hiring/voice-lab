@@ -96,6 +96,15 @@ The artifact is treated as hostile, because the fork's run could have uploaded a
 - the comment is found by a hidden marker **and** the `github-actions[bot]` author, so a
   comment someone else plants with the marker is ignored.
 
+A pull request opened before the fork preview reached `main` may never get a build: a
+`pull_request` run takes its workflows from `refs/pull/<N>/merge`, and until GitHub
+recomputes that merge it still sits on the old `main`. Reopening is not a reliable fix —
+the event can fire before the recompute. Adding the `preview` label rebuilds the preview
+of any fork pull request without closing it and without notifying its author; if even that
+starts nothing, open the pull request (or `GET /pulls/<N>`) so GitHub recomputes the
+merge, and label it again. A first-time contributor's own pushes still wait for a
+maintainer to approve the run, as every workflow here does.
+
 When the pull request closes,
 [`preview-pr-cleanup.yml`](../.github/workflows/preview-pr-cleanup.yml) deletes its
 directory, marks the deployment inactive and edits the comment. It uses

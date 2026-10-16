@@ -4,20 +4,29 @@ name: preview-pr-build
 # nothing to write with: a read-only token, no secrets, and its whole output is a build
 # handed to preview-pr-deploy, which treats it as untrusted data. Branches of this
 # repository are covered by preview.yml instead.
+#
+# A `pull_request` run takes this file from refs/pull/<N>/merge as GitHub last computed it.
+# For a pull request opened before this file reached main that merge can still sit on the
+# old main, which has no such workflow, and then nothing runs — reopening does not help
+# when GitHub fires the event before recomputing the merge. The `preview` label is the way
+# to ask again without closing the pull request, and it does not notify its author.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
-concurrency:
-  group: preview-pr-build-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   build:
-    if: github.event.pull_request.head.repo.full_name != github.repository
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'preview')
+    # On the job, not the workflow: an unrelated label skips the job and must not cancel a
+    # build in progress for the same pull request.
+    concurrency:
+      group: preview-pr-build-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
