@@ -26,6 +26,8 @@ Needs two repository secrets:
 The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `ADMIN_TOKEN`) are bound to the
 Worker with `wrangler secret put` and are untouched by a deploy, so they never pass through
 CI. `AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
+For the coach, `AGENT_ID` has to allow the LLM and language overrides as well as the
+prompt, or the coach's conversation drops ([pipeline](pipeline.md)).
 
 ## Interview keys
 

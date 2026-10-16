@@ -1,13 +1,24 @@
 import type { EventBus } from "../events";
+import type { Role } from "../persona";
 import type { Transport } from "../transport";
 import type { TurnMetrics } from "../types";
 
 /** Which managed service runs the conversation. Chosen per key, in the admin page. */
 export type Engine = "elevenlabs" | "deepgram";
 
-export interface SessionDeps {
+/**
+ * The role is read at start; a live conversation keeps the one it opened with. Deepgram
+ * reads only its prompt: the model, language and recogniser hints are ElevenLabs settings.
+ */
+export interface SessionDeps extends Role {
   bus: EventBus;
   transport: Transport;
+  /**
+   * Material for what the person just said, or null. ElevenLabs gets it as a contextual
+   * update, which lands after the server has started the reply to those words, so it
+   * informs the turns after. Deepgram ignores it.
+   */
+  knowledgeFor?: (words: string) => string | null;
   /** Called when a turn completes, with what each stage cost. */
   onTurn: (metrics: TurnMetrics) => void;
   /**

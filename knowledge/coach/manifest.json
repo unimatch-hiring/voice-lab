@@ -1,0 +1,147 @@
+{
+  "documents": [
+    {
+      "file": "chgk-rules.md",
+      "title": "ЧГК: правила игры",
+      "sources": [
+        { "title": "Кодекс спортивного «Что? Где? Когда?» (2023)", "url": "https://old-codices.surge.sh/codex-2023.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Правила командных викторин с раундами по минуте (КВРМ)", "url": "https://www.chgk.fi/rules", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "chgk-judging.md",
+      "title": "ЧГК: зачёт ответов и апелляции",
+      "sources": [
+        { "title": "Кодекс спортивного «Что? Где? Когда?» (2023), главы 2.1–2.2", "url": "https://old-codices.surge.sh/codex-2023.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "chgk-ethics.md",
+      "title": "ЧГК: этика игры",
+      "sources": [
+        { "title": "Кодекс спортивного «Что? Где? Когда?» (2023), приложения Г и Д", "url": "https://old-codices.surge.sh/codex-2023.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "brain-ring-rules.md",
+      "title": "Брейн-ринг: правила игры",
+      "sources": [
+        { "title": "intgames-rules: Правила брейн-ринга (с фальстартами)", "url": "https://github.com/nfarukshin/intgames-rules/blob/main/brain-ring.md", "reuse": "cc0", "accessed": "2026-10-15" },
+        { "title": "Лига украинских клубов: правила спортивного «Брэйн-ринга»", "url": "https://luk.org.ua/documents/rules-br", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Регламент брейн-ринга, турнир в США 2019", "url": "http://us2019.chgk.info/br_regl", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Регламент «Брейн-ринга», Открытый чемпионат Канады 2024", "url": "https://van2024.chgk.info/reg-brain", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Брейн-ринг — Летний лагерь (вариант без фальстартов)", "url": "https://summercamp.ru/%D0%91%D1%80%D0%B5%D0%B9%D0%BD_%D1%80%D0%B8%D0%BD%D0%B3", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», типовой регламент брейн-ринга (В. Белкин)", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-18.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "М. Поташев «Почему вы проигрываете в ЧГК?», «Железные правила»", "url": "https://www.phantastike.com/game_theory/chgk/pdf/", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "svoya-igra-rules.md",
+      "title": "Своя игра и Эрудит-квартет: правила игры",
+      "sources": [
+        { "title": "intgames-rules: Правила спортивной «Своей игры» (без фальстартов)", "url": "https://github.com/nfarukshin/intgames-rules/blob/main/ssi-without-false-starts.md", "reuse": "cc0", "accessed": "2026-10-15" },
+        { "title": "intgames-rules: Правила эрудит-квартета", "url": "https://github.com/nfarukshin/intgames-rules/blob/main/ek.md", "reuse": "cc0", "accessed": "2026-10-15" },
+        { "title": "Лига украинских клубов: правила спортивной «Своей игры»", "url": "http://luk.org.ua/documents/rules-si", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Регламент первого Чемпионата России по спортивной «Своей игре»", "url": "http://si-chross.chgk.info/index.php?page=turnir_nonfalstart", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "daugavpils.md",
+      "title": "Даугавпилс («Десятка»): формат игры",
+      "sources": [
+        { "title": "Клуб IGC: правила игры «Десятка»", "url": "https://club-igc.narod.ru/10ka.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Центр развития интеллекта: Даугавпилс", "url": "http://cri.at.ua/index/daugavpils/0-71", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Сленг интеллектуальных игр: Даугавпилс", "url": "https://math-solution.ru/slang/2400", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "gorod.lv: игра «Даугавпилс о Даугавпилсе»", "url": "https://www.gorod.lv/novosti/341752-prazdnik-goroda-v-eto-voskresene-tsentre-russkoi-kultury-proidet-igra-daugavpils-o-daugavpilse", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "training-season.md",
+      "title": "Тренировочный сезон: план занятий",
+      "sources": [
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», методика первых тренировок (В. Белкин)", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-17.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Там же, «Занятие 5 и далее»", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-18.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "coaching-children.md",
+      "title": "Как тренер ведёт себя с детьми и командой",
+      "sources": [
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», методика В. Белкина", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-17.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "М. Поташев «Почему вы проигрываете в ЧГК?»", "url": "https://www.phantastike.com/game_theory/chgk/pdf/", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "training-drills.md",
+      "title": "Разминочные игры и конкурсы",
+      "sources": [
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», методика В. Белкина", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-17.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Там же, «Бескрылки»", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-18.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "team-roles.md",
+      "title": "Команда ЧГК: капитан, роли и рассадка",
+      "sources": [
+        { "title": "М. Поташев «Почему вы проигрываете в ЧГК?»", "url": "https://www.phantastike.com/game_theory/chgk/pdf/", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», обязанности капитана (В. Белкин)", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-17.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Единая студенческая лига «Универсум»: методическое пособие", "url": "http://db.rgub.ru/youthpolicy/sngregd/Intellectualnie_igri_Liga.pdf", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Сириус: мастер-класс по интеллектуальным играм (теории рассадки)", "url": "https://sochisirius.ru/news/2105", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "discussion-technique.md",
+      "title": "ЧГК: техника обсуждения за минуту",
+      "sources": [
+        { "title": "М. Поташев «Почему вы проигрываете в ЧГК?»", "url": "https://www.phantastike.com/game_theory/chgk/pdf/", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», азы игры (В. Белкин)", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-18.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "chgk-unwinding.md",
+      "title": "ЧГК: как устроена раскрутка вопроса",
+      "sources": [
+        { "title": "Пакет «Лига разума», 20.02.2021 — разбор приёмов, без текста вопросов", "url": "https://gotquestions.online/pack/7266", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "chgk-question-recipes.md",
+      "title": "ЧГК: как составить простой тренировочный вопрос",
+      "sources": [
+        { "title": "Кодекс спортивного «Что? Где? Когда?» (2023)", "url": "https://old-codices.surge.sh/codex-2023.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Пакет «Лига разума» (школьники) — разбор приёмов, без текста вопросов", "url": "https://gotquestions.online/pack/7264", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Студенческий пакет — разбор уровня, без текста вопросов", "url": "https://gotquestions.online/pack/6730", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "school-tournament.md",
+      "title": "Школьный и студенческий турнир: типовые регламенты",
+      "sources": [
+        { "title": "И. Тюрикова и др. «Что? Где? Когда?», типовые регламенты (В. Белкин)", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-18.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Там же, «Суперфинал»", "url": "https://itexts.net/avtor-irina-konstantinovna-tyurikova/2641-chto-gde-kogda-irina-tyurikova/read/page-19.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Кодекс спортивного «Что? Где? Когда?» (2023), глава 3.6", "url": "https://old-codices.surge.sh/codex-2023.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "resources.md",
+      "title": "Где брать вопросы, правила и литературу",
+      "sources": [
+        { "title": "База вопросов «Что? Где? Когда?»", "url": "https://db.chgk.info/", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "«Есть вопросы?»", "url": "https://gotquestions.online/", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "chgk.livejournal.com: новое зеркало базы вопросов", "url": "https://chgk.livejournal.com/5248953.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "Турнирный сайт сообщества знатоков", "url": "https://rating.chgk.info/", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "intgames-rules", "url": "https://github.com/nfarukshin/intgames-rules", "reuse": "cc0", "accessed": "2026-10-15" },
+        { "title": "Из опыта работы школьного клуба интеллектуальных игр", "url": "https://infourok.ru/iz-opita-raboti-shkolnogo-kluba-intellektualnih-igr-3599625.html", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    },
+    {
+      "file": "glossary.md",
+      "title": "Словарь терминов интеллектуальных игр",
+      "sources": [
+        { "title": "Кодекс спортивного «Что? Где? Когда?» (2023), приложение Д", "url": "https://old-codices.surge.sh/codex-2023.html", "reuse": "paraphrase", "accessed": "2026-10-15" },
+        { "title": "intgames-rules", "url": "https://github.com/nfarukshin/intgames-rules", "reuse": "cc0", "accessed": "2026-10-15" },
+        { "title": "М. Поташев «Почему вы проигрываете в ЧГК?»", "url": "https://www.phantastike.com/game_theory/chgk/pdf/", "reuse": "paraphrase", "accessed": "2026-10-15" }
+      ]
+    }
+  ]
+}

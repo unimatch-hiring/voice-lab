@@ -64,6 +64,34 @@ role it opened with, so switching roles means a new session. And the agent must 
 override: with it disallowed the server closes the connection instead of ignoring the
 field, which reaches the page as a dropped conversation rather than an error about prompts.
 
+Each theme is a role in `persona.ts`: the prompt, plus — for the coach — the model
+(`prompt.llm`), the language and up to 50 ASR keywords. A field the role leaves unset is
+not sent, because the model and the language drop the connection like the prompt does when
+the agent does not allow them; ASR keywords alone are ignored silently. So `AGENT_ID` must
+allow the prompt, LLM and language overrides, and ASR keywords for the hints to count.
+
+The coach's knowledge base is searched in the page, not on the agent, so it needs no access
+to the ElevenLabs account. After each thing the person says, the best sections go to the
+agent with `sendContextualUpdate` under the one context id `knowledge`, each replacing the
+last, and the same material is not sent twice in a row. The user transcript arrives after
+the server has started its reply, so the material informs the turns after those words,
+not the reply to them. Deepgram ignores it. What goes into the base and how it is ranked:
+[knowledge](knowledge.md).
+
+## Training questions
+
+Before a coach session opens, the page asks the Worker's `/questions` for one question per
+skill — `replacement`, `homogeneous`, `any` — in one request, and puts them into the prompt
+under `# Questions for this session`
+([`trainingQuestion.ts`](../src/lib/trainingQuestion.ts)). A draw that fails or takes over
+five seconds leaves the list empty rather than holding up the start. When the list runs
+out, the coach says so and composes its own question by the recipes in the knowledge base.
+
+The Worker reads at most two pack pages from the audience's pool, gives every skill a
+different question from them, and keeps only those that can be played by voice at that
+level ([`worker/questions.js`](../worker/questions.js)). Nothing is stored: the site is read
+live, behind a day of edge cache.
+
 ## Backup engine: Deepgram
 
 When ElevenLabs is down, a key can be switched to [Deepgram's Voice Agent

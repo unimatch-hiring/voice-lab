@@ -1,5 +1,4 @@
 import { Desmoother } from "../mouthLevel";
-import { SYSTEM_PROMPT } from "../persona";
 import type { StageName, TurnMetrics } from "../types";
 import { createBrowserAudio, OUTPUT_RATE, type DeepgramAudio } from "./deepgramAudio";
 import type { SessionDeps, VoiceSession } from "./session";
@@ -181,7 +180,7 @@ export class DeepgramSession implements VoiceSession {
         listen: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.listen, language: "en" } },
         think: {
           provider: { type: "open_ai", model: DEEPGRAM_MODELS.think },
-          prompt: SYSTEM_PROMPT,
+          prompt: this.deps.prompt,
           ...(functions?.length ? { functions } : {}),
         },
         speak: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.speak } },
