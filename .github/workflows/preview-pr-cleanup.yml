@@ -3,8 +3,8 @@ name: preview-pr-cleanup
 # Drops a fork's preview when its pull request closes. pull_request_target, because a
 # fork's own `pull_request` run gets a read-only token and could not push the removal.
 # What makes that trigger dangerous is checking out and running the pull request's code
-# with the write token; this job checks out only gh-pages and deletes one directory whose
-# name comes from GitHub's event, not from the fork.
+# with the write token; this job checks out only the previews repository and deletes one
+# directory whose name comes from GitHub's event, not from the fork.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] -- no checkout of the PR, see above
     types: [closed]
@@ -12,15 +12,17 @@ on:
 permissions: {}
 
 concurrency:
-  group: gh-pages
+  group: previews
   cancel-in-progress: false
+
+env:
+  PREVIEWS_REPO: unimatch-screening/voice-lab-previews
 
 jobs:
   remove:
     if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       pull-requests: write
       deployments: write
     steps:
@@ -30,25 +32,25 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ env.PREVIEWS_REPO }}
           ref: gh-pages
           path: site
+          ssh-key: ${{ secrets.PREVIEWS_DEPLOY_KEY }}
           # Kept on purpose: this checkout is the one that pushes.
           persist-credentials: true
-        continue-on-error: true
 
       - name: Drop the preview
         env:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          [ -d site/.git ] || { echo "nothing published yet"; exit 0; }
           cd site
-          [ -d "pr-preview/pr-$PR" ] || { echo "no preview for pr-$PR"; exit 0; }
-          rm -rf "pr-preview/pr-$PR"
+          [ -d "pr-$PR" ] || { echo "no preview for pr-$PR"; exit 0; }
+          rm -rf "pr-$PR"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "Drop preview pr-$PR"
+          git commit -q -m "Drop preview $GITHUB_REPOSITORY#$PR"
           git push -q origin HEAD:gh-pages
 
       - name: Retire the link

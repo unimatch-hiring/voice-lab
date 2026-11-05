@@ -12,7 +12,7 @@ on:
 permissions:
   contents: read
 
-# Branch previews write to the same branch, so the two cannot push at once.
+# Kept apart from a manual dispatch racing an automatic run.
 concurrency:
   group: gh-pages
   cancel-in-progress: false
@@ -107,9 +107,10 @@ jobs:
             git -C site remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           fi
 
-          # Everything in the root belongs to main's build and is replaced wholesale.
-          # `pr-preview/` does not: branch previews live there and outlive any one deploy.
-          find site -mindepth 1 -maxdepth 1 ! -name .git ! -name pr-preview -exec rm -rf {} +
+          # Everything belongs to main's build and is replaced wholesale. Previews are served
+          # from unimatch-screening/voice-lab-previews: unreviewed code on this origin
+          # could read the admin session out of IndexedDB.
+          find site -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -R dist/. site/
           # Pages runs Jekyll otherwise, which drops files whose names start with an
           # underscore — Vite emits none today, but a plugin that does would be a silent

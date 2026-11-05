@@ -47,7 +47,10 @@ jobs:
       - name: Build
         env:
           VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
-          BASE_PATH: /${{ github.event.repository.name }}/pr-preview/pr-${{ github.event.pull_request.number }}/
+          # Served by unimatch-screening/voice-lab-previews, another account's Pages, so the
+          # preview shares no storage with the admin page on unimatch-hiring.github.io.
+          BASE_PATH: /voice-lab-previews/pr-${{ github.event.pull_request.number }}/
+          VITE_PREVIEW: "1"
         run: |
           # An empty variable would override config.ts's default with "" and leave the
           # page offline; unset, the build falls back to the deployed Worker.

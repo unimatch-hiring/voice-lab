@@ -44,13 +44,34 @@ is no live agent to talk to.
 
 `ALLOWED_ORIGINS` in [`wrangler.toml`](../worker/wrangler.toml) lists who may call the
 Worker; everyone else gets 403. It includes `:5173` for the dev server and `:4173` for
-`vite preview`, because checking the production build locally runs on the latter. Previews, branch or fork, are
-paths on the same `https://unimatch-hiring.github.io` origin and need no entry of their own.
+`vite preview`, because checking the production build locally runs on the latter.
+
+Previews are served from `https://unimatch-screening.github.io`, listed apart in
+`PREVIEW_ORIGINS`. That origin reaches only what a candidate's page calls — `/engine`,
+`/agent/token`, `/deepgram-token` — and gets 403 on everything under `/admin/`. An Origin
+header is easy to forge outside a browser, so this is a second line, not the first: the
+first is that preview code runs on an origin that holds no admin session at all.
+
+## Where previews live
+
+Every preview — branch or fork — is published to
+[`unimatch-screening/voice-lab-previews`](https://github.com/unimatch-screening/voice-lab-previews)
+and served from `https://unimatch-screening.github.io/voice-lab-previews/`. Not from this
+repository's `gh-pages`: a page on `unimatch-hiring.github.io` shares IndexedDB with the
+admin page, and the admin session kept there (see
+[`tokenStore.ts`](../src/lib/tokenStore.ts)) can be decrypted by any script on that origin.
+`github.io` is on the Public Suffix List, so another account's Pages are a different site
+to the browser, not just a different path.
+
+The workflows push there with a deploy key (`PREVIEWS_DEPLOY_KEY`) that can write that
+one repository and nothing else. Preview builds also set `VITE_PREVIEW=1`, which turns
+`?admin` into a notice; that is a convenience, since a pull request can rewrite the code
+that reads it.
 
 ## Branch previews
 
 A branch pushed to this repository is published under
-`https://unimatch-hiring.github.io/voice-lab/pr-preview/<branch>/`, so a change can be
+`https://unimatch-screening.github.io/voice-lab-previews/branch/<branch>/`, so a change can be
 looked at without merging it. Four live at once; past that the least recently touched are
 dropped, because a merged-and-abandoned branch never fires the `delete` event that would
 clean it up.
@@ -60,16 +81,15 @@ in place, one per branch), a deployment entry on the branch, and the run's own s
 Without the deployment GitHub shows a preview nowhere in its interface — it exists, but
 only the workflow log knows the address.
 
-Two consequences worth knowing.
+Dependabot's branches get no preview: its runs receive no Actions secrets, so there is
+no key to publish with.
 
-The site is a branch (`gh-pages`), not an upload. `main`'s build replaces the root and
-leaves `pr-preview/` alone; a preview writes only its own directory. Both take the same
-concurrency group, so they cannot push over each other.
+The site is a branch (`gh-pages`), not an upload, and `main`'s build replaces all of it.
 
 ## Fork previews
 
 A pull request from a fork is published under
-`https://unimatch-hiring.github.io/voice-lab/pr-preview/pr-<N>/`, and the link arrives as
+`https://unimatch-screening.github.io/voice-lab-previews/pr-<N>/`, and the link arrives as
 a comment on the pull request (one, edited in place) and as a `fork-preview` deployment
 on it. The reviewer opens the link, pastes an access key into the page and talks to it —
 nothing to run locally.
@@ -83,7 +103,7 @@ in two:
   artifact. Nothing else leaves it.
 - [`preview-pr-deploy.yml`](../.github/workflows/preview-pr-deploy.yml) — `workflow_run`,
   which always runs the copy on `main`, so a pull request cannot edit it. It holds the
-  write token and runs no project code: no install, no build, nothing from the artifact.
+  deploy key and runs no project code: no install, no build, nothing from the artifact.
 
 The artifact is treated as hostile, because the fork's run could have uploaded anything:
 
@@ -110,18 +130,19 @@ When the pull request closes,
 directory, marks the deployment inactive and edits the comment. It uses
 `pull_request_target` because the fork's own `pull_request` run cannot push; the risk of
 that trigger is running the pull request's code with the write token, and this job checks
-out nothing but `gh-pages` and takes the number from GitHub's event, not from the fork.
+out nothing but the previews repository and takes the number from GitHub's event, not
+from the fork.
 
-All four workflows that push `gh-pages` share the `gh-pages` concurrency group. Branch
-previews and fork previews prune separately — four of each, oldest first — and neither
-touches the other's directories; a branch whose name would turn into `pr-<N>` is published
-as `branch-pr-<N>`. GitHub keeps only one pending run per concurrency group, so a cleanup
+The three preview workflows share the `previews` concurrency group. Branch previews
+(`branch/<name>/`) and fork previews (`pr-<N>/`) prune separately — four of each, oldest
+first — and neither touches the other's directories. GitHub keeps only one pending run per
+concurrency group, so a cleanup
 can occasionally be superseded; the next fork deploy also drops previews of closed pull
 requests.
 
 Two things this does not change. Whether a first-time contributor's run waits for
-"Approve and run" is the organisation's Actions setting, untouched here. And a preview is
-the candidate's JavaScript served from `unimatch-hiring.github.io`, the same origin as the
-site: it can read the key saved in this browser (see
-[`tokenStore.ts`](../src/lib/tokenStore.ts)). Review a fork's preview with a key issued for
-that review, and forget it afterwards.
+"Approve and run" is the organisation's Actions setting, untouched here. And previews of
+different pull requests share one origin, so one candidate's preview can read an interview
+key saved in the same browser by another's. Those keys live hours and are tied to one
+engine; review a fork's preview with a key issued for that review, and forget it
+afterwards.

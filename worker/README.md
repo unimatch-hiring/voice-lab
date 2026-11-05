@@ -96,6 +96,10 @@ After deploying, put the address you get
 Everyone else gets `403`. Changing it needs no code edit: adjust `[vars]` and
 `wrangler deploy`.
 
+`PREVIEW_ORIGINS` is where pull request previews are served. They run unreviewed code,
+so they reach only the candidate's endpoints (`/engine`, `/agent/token`,
+`/deepgram-token`) and get `403` on everything under `/admin/`.
+
 For GitHub Pages the origin is the host only (`https://<org>.github.io`), without
 the project path.
 
