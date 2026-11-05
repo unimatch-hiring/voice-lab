@@ -184,6 +184,15 @@ test("Settings carry the role, the client functions and English-only managed mod
   expect(settings.agent.listen.provider.language).toBe("en");
 });
 
+test("Settings carry the English greeting", async () => {
+  const { socket } = await harness({ functions: [clock] });
+
+  const settings = socket.json().find((m) => m.type === "Settings");
+  expect(settings.agent.greeting).toBe(
+    "Hello! My name is Alexandra, I'm the administrator of Family Fitness. How can I help you?",
+  );
+});
+
 test("microphone audio waits for SettingsApplied", async () => {
   const audio = fakeAudio();
   const session = new DeepgramSession({

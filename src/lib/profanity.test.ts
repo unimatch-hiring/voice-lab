@@ -1,0 +1,87 @@
+import { expect, test } from "vitest";
+import { maskProfanity } from "./profanity";
+
+test("profanity is masked in any form and case", () => {
+  const words = [
+    "блядь",
+    "БЛЯТЬ",
+    "бля",
+    "хуй",
+    "нихуя",
+    "охуел",
+    "пиздец",
+    "Распиздяй",
+    "ебать",
+    "заебал",
+    "долбоёб",
+    "мудак",
+    "сука",
+    "гандон",
+    "уёбок",
+    "уебок",
+    "отъебись",
+    "объебать",
+    "въебать",
+    "нехуй",
+    "хули",
+    "мудила",
+    "сучара",
+    "пидор",
+    "педик",
+    "шлюха",
+    "залупа",
+    "манда",
+    "ублюдок",
+    "дерьмо",
+    "говно",
+    "жопа",
+    "cunt",
+    "dickhead",
+    "bastard",
+    "slut",
+    "whore",
+    "nigger",
+    "faggot",
+    "fuck",
+    "Fucking",
+    "motherfucker",
+    "SHIT",
+    "bullshit",
+    "bitch",
+    "asshole",
+  ];
+  for (const word of words) {
+    expect(maskProfanity(`ну ${word}, правда`), word).toBe(`ну ${"*".repeat(word.length)}, правда`);
+  }
+});
+
+test("ordinary words that resemble profanity stay intact", () => {
+  const words = [
+    "хлеб",
+    "учеба",
+    "себя",
+    "требует",
+    "гребля",
+    "небо",
+    "команда",
+    "хуже",
+    "рубля",
+    "застрахуй",
+    "употреблять",
+    "скипидар",
+    "педикюр",
+    "мудрый",
+    "сукно",
+    "бляха",
+    "мандарин",
+    "художник",
+    "хулиган",
+    "эбола",
+    "Ебола",
+    "педикулез",
+    "Scunthorpe",
+    "Dickens",
+    "assess",
+  ];
+  for (const word of words) expect(maskProfanity(word), word).toBe(word);
+});

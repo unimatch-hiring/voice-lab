@@ -44,6 +44,12 @@
   --rack-ink: #e6edf3;
   --rack-dim: #8b95a5;
   --rack-sunken: #0f141b;
+  /* The transcript's four kinds of line, chosen to read on the rack in either theme.
+     Unverified stays clear of red: that is --fail, a broken pipeline rather than a claim. */
+  --claim-you: #8ab4ff;
+  --claim-fact: #4ade80;
+  --claim-assumption: #fbbf24;
+  --claim-unverified: #f0abfc;
 
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -746,6 +752,64 @@ body {
 .line[data-who="you"] .line-who { color: var(--stage-stt); }
 .line[data-who="agent"] .line-who { color: var(--stage-tts); }
 .line[data-failed="true"] .line-text { color: var(--fail); }
+
+.line[data-who="you"] .line-text,
+.legend-you {
+  color: var(--claim-you);
+}
+
+.transcript-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* Fact against assumption is the point of the highlight, so it must survive without
+   colour vision: a solid underline and upright text against dashed and italic. A claim
+   of fact the directory does not back says so in words. */
+[data-claim="unverified"],
+.legend-unverified {
+  color: var(--claim-unverified);
+}
+
+[data-claim="unverified"] {
+  border-bottom-style: dotted;
+  border-bottom-width: 1px;
+  border-bottom-color: var(--claim-unverified);
+}
+
+[data-claim="unverified"]::after {
+  content: " (не подтверждено)";
+}
+
+[data-claim="fact"],
+.legend-fact {
+  color: var(--claim-fact);
+}
+
+[data-claim="fact"] {
+  border-bottom-style: solid;
+  border-bottom-width: 1px;
+  border-bottom-color: var(--claim-fact);
+}
+
+[data-claim="assumption"],
+.legend-assumption {
+  color: var(--claim-assumption);
+}
+
+[data-claim="assumption"] {
+  border-bottom-style: dashed;
+  border-bottom-width: 1px;
+  border-bottom-color: var(--claim-assumption);
+  font-style: italic;
+}
 
 /* ── settings ──────────────────────────────────────────────────────────── */
 

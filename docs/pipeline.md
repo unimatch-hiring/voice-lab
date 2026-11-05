@@ -63,6 +63,27 @@ Two consequences. It applies **once, at session start** — a running conversati
 role it opened with, so switching roles means a new session. And the agent must permit the
 override: with it disallowed the server closes the connection instead of ignoring the
 field, which reaches the page as a dropped conversation rather than an error about prompts.
+The first message goes the same way (`firstMessage`, `agent.greeting` on Deepgram), so that
+override has to be allowed on the agent too. It counts as a turn: metrics are reported, and
+a `?record` file holds one more turn than the person's questions.
+
+What the agent may state as fact lives in `src/lib/club.ts`, grouped by the source it cites.
+The prompt and the transcript's highlighting are both built from it. The agent flags claims the
+way a person would, opening a sentence with `По прайс-листу,` or `Думаю,`, and
+[`claims.ts`](../src/lib/claims.ts) splits on those phrases; each answers for its own sentence.
+A cited sentence reads as a fact only if it states an entry of that source
+([`factMatch.ts`](../src/lib/factMatch.ts)): numbers, prices and times are compared by value,
+whether written as digits or words, and the vocabulary is closed, so any meaningful word outside
+the entry breaks the match. Otherwise it is shown as `не подтверждено`. A later sentence with no
+phrase of its own becomes a fact only if it states an entry of the same source, and otherwise
+stays plain. A claim with no phrase reads as plain text, whatever it says, unless a hedge inside
+it marks a guess. New wording that the check rejects goes into `also` in `club.ts` or the word
+lists of `factMatch.ts`, with a false twin added to the tests: `also` is for the check only and
+never reaches the prompt.
+
+Refusing forbidden topics is the prompt's job and is not guaranteed. The transcript masks
+profanity on screen ([`profanity.ts`](../src/lib/profanity.ts)), in both parties' lines; the
+bus, and so `?record` files, keep the original text.
 
 ## Backup engine: Deepgram
 

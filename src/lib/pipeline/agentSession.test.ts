@@ -98,3 +98,60 @@ test("the role is sent with the handshake, not left to the agent's own prompt", 
     | undefined;
   expect(overrides?.agent?.prompt?.prompt).toBe(SYSTEM_PROMPT);
 });
+
+test("the greeting is sent with the handshake", async () => {
+  await harness();
+
+  const overrides = startOptions.overrides as { agent?: { firstMessage?: string } } | undefined;
+  expect(overrides?.agent?.firstMessage).toBe(
+    "Здравствуйте! Меня зовут Александра, я администратор клуба Family Fitness. Чем могу вам помочь?",
+  );
+});
+
+const replies = (events: PipelineEvent[]) =>
+  events.filter((e) => e.type === "agent-reply").map((e) => (e as { text: string }).text);
+
+const say = (text: string) => handlers.onMessage?.({ message: text, source: "ai" } as never);
+const stream = (text: string) => handlers.onAgentChatResponsePart?.({ text } as never);
+
+test("a final reply is announced once however it was streamed", async () => {
+  const matched = await harness();
+  stream("при");
+  stream("вет");
+  say("привет");
+  expect(replies(matched.events), "the stream matched the final text").toEqual(["привет"]);
+
+  const unstreamed = await harness();
+  say("привет");
+  expect(replies(unstreamed.events), "nothing was streamed").toEqual(["привет"]);
+
+  const diverged = await harness();
+  stream("прив");
+  say("привет");
+  expect(replies(diverged.events), "the stream differs from the final text").toEqual(["привет"]);
+});
+
+test("consecutive replies are each announced", async () => {
+  const { events } = await harness();
+
+  stream("первая");
+  say("первая");
+  stream("вторая");
+  say("вторая");
+  say("третья");
+
+  expect(replies(events)).toEqual(["первая", "вторая", "третья"]);
+});
+
+test("a streamed reply still counts its tokens and characters", async () => {
+  const { turns } = await harness();
+
+  handlers.onModeChange?.({ mode: "speaking" } as never);
+  stream("аб");
+  stream("вг");
+  say("абвг");
+  handlers.onModeChange?.({ mode: "listening" } as never);
+
+  expect(turns[0].llmTokens).toBe(2);
+  expect(turns[0].ttsChars).toBe(4);
+});

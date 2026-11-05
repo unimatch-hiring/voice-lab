@@ -1,4 +1,5 @@
 import { Conversation } from "@elevenlabs/client";
+import { GREETING } from "../club";
 import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
 import type { StageName, TurnMetrics } from "../types";
@@ -31,8 +32,6 @@ export class AgentSession implements VoiceSession {
   private stageAt = 0;
   private stage: StageName | null = null;
   private metrics: TurnMetrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
-  /** Reply text already shown token by token, so the final message is not repeated. */
-  private streamedReply = "";
   /** Lanes opened outside the mode machine — vad, stt and tts overlap the main stages. */
   private lanes = new Map<StageName, number>();
   private vadOpen = false;
@@ -90,8 +89,9 @@ export class AgentSession implements VoiceSession {
     this.conversation = await Conversation.startSession({
       conversationToken: token,
 
-      // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      // The role travels with the handshake: the server applies it only at start. Each
+      // field must be allowed on the agent, or the server closes the connection.
+      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT }, firstMessage: GREETING.ru } },
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
@@ -134,20 +134,14 @@ export class AgentSession implements VoiceSession {
         }
 
         // `onAgentChatResponsePart` streams the reply earlier but is experimental and does
-        // not always fire, so this is the source of record.
+        // not always fire, so this is the source of record: it also ends the streamed line.
         this.metrics.ttsChars += message.length;
-        if (this.streamedReply.trim() === message.trim()) {
-          this.streamedReply = "";
-          return;
-        }
-        this.streamedReply = "";
         this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
       },
 
       onAgentChatResponsePart: (part) => {
         const text = part?.text ?? "";
         if (!text) return;
-        this.streamedReply += text;
         this.metrics.llmTokens += 1;
         this.deps.bus.emit({ type: "llm-token", token: text, at: performance.now() });
       },

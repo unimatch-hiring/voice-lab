@@ -1,3 +1,4 @@
+import { GREETING } from "../club";
 import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
 import type { StageName, TurnMetrics } from "../types";
@@ -185,6 +186,7 @@ export class DeepgramSession implements VoiceSession {
           ...(functions?.length ? { functions } : {}),
         },
         speak: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.speak } },
+        greeting: GREETING.en,
       },
     };
   }
