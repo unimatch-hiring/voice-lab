@@ -1,9 +1,14 @@
 name: preview-pr-deploy
 
 # Second half of a fork's preview. workflow_run always runs this file as it is on main,
-# never the pull request's copy, so this is where the write token lives. It runs no
+# never the pull request's copy, so this is where the write credentials live. It runs no
 # project code: no install, no build, no script from the artifact. The artifact was made
 # by fork code and is read as untrusted data — its claims are checked against GitHub.
+#
+# The preview is published to PREVIEWS_REPO, whose Pages are another account's origin.
+# Served from unimatch-hiring.github.io it would share IndexedDB with the admin page and
+# could read the admin session. The deploy key can write that one repository and nothing
+# else, so this job holds no credential to this repository's contents.
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] -- runs no PR code, artifact checked, see above
     workflows: [preview-pr-build]
@@ -11,14 +16,16 @@ on:
 
 permissions: {}
 
-# Shared with deploy.yml, preview.yml and preview-pr-cleanup.yml: all of them push gh-pages.
+# Shared with preview.yml and preview-pr-cleanup.yml: all of them push PREVIEWS_REPO.
 concurrency:
-  group: gh-pages
+  group: previews
   cancel-in-progress: false
 
-# Fork previews past this are dropped, oldest first. Counted apart from branch previews:
-# each mechanism prunes only its own `pr-<N>` or branch directories, never the other's.
 env:
+  PREVIEWS_REPO: unimatch-screening/voice-lab-previews
+  PREVIEWS_URL: https://unimatch-screening.github.io/voice-lab-previews
+  # Fork previews past this are dropped, oldest first. Counted apart from branch previews,
+  # which live under `branch/` and are pruned by preview.yml.
   KEEP: 4
 
 jobs:
@@ -30,7 +37,7 @@ jobs:
       github.event.workflow_run.head_repository.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
       deployments: write
       actions: read
@@ -96,11 +103,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pr.outputs.number != ''
         with:
+          repository: ${{ env.PREVIEWS_REPO }}
           ref: gh-pages
           path: site
+          ssh-key: ${{ secrets.PREVIEWS_DEPLOY_KEY }}
           # Kept on purpose: this checkout is the one that pushes.
           persist-credentials: true
-        continue-on-error: true
 
       - name: Publish the preview
         if: steps.pr.outputs.number != ''
@@ -112,24 +120,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ ! -d site/.git ]; then
-            rm -rf site
-            mkdir site
-            git -C site init -q -b gh-pages
-            git -C site remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-            touch site/.nojekyll
-          fi
-
           cd site
-          rm -rf "pr-preview/pr-$PR"
-          mkdir -p "pr-preview/pr-$PR"
-          cp -R "$RUNNER_TEMP/preview/site/." "pr-preview/pr-$PR/"
+          rm -rf "pr-$PR"
+          mkdir -p "pr-$PR"
+          cp -R "$RUNNER_TEMP/preview/site/." "pr-$PR/"
 
           # A closed pull request normally loses its preview in preview-pr-cleanup, but a
-          # pending run in the gh-pages group can be superseded, so this sweeps up after it.
-          for dir in pr-preview/pr-*/; do
+          # pending run in the previews group can be superseded, so this sweeps up after it.
+          for dir in pr-*/; do
             [ -d "$dir" ] || continue
-            n=${dir#pr-preview/pr-}; n=${n%/}
+            n=${dir#pr-}; n=${n%/}
             if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" = "$PR" ]; then continue; fi
             state=$(gh api "repos/$REPO/pulls/$n" --jq .state 2>/dev/null || echo unknown)
             if [ "$state" = closed ]; then
@@ -138,10 +138,10 @@ jobs:
             fi
           done
 
-          for dir in pr-preview/pr-*/; do
-            if ! [[ "$dir" =~ ^pr-preview/pr-[0-9]+/$ ]]; then continue; fi
+          for dir in pr-*/; do
+            if ! [[ "$dir" =~ ^pr-[0-9]+/$ ]]; then continue; fi
             # This one is not committed yet, so it has no date and would sort as the oldest.
-            if [ "$dir" = "pr-preview/pr-$PR/" ]; then continue; fi
+            if [ "$dir" = "pr-$PR/" ]; then continue; fi
             printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$dir" 2>/dev/null || echo 0)" "$dir"
           done | sort -rn | tail -n "+$KEEP" | cut -f2 | while read -r old; do
             echo "dropping $old"
@@ -152,7 +152,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --quiet --cached && { echo "preview unchanged"; exit 0; }
-          git commit -q -m "Preview pr-$PR at ${HEAD_SHA:0:7}"
+          git commit -q -m "Preview $GITHUB_REPOSITORY#$PR at ${HEAD_SHA:0:7}"
           git push -q origin HEAD:gh-pages
 
       - name: Leave the link on the pull request
@@ -160,13 +160,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          OWNER: ${{ github.repository_owner }}
-          NAME: ${{ github.event.repository.name }}
           PR: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          url="https://${OWNER,,}.github.io/$NAME/pr-preview/pr-$PR/"
+          url="$PREVIEWS_URL/pr-$PR/"
           echo "### Preview" >> "$GITHUB_STEP_SUMMARY"
           echo "$url" >> "$GITHUB_STEP_SUMMARY"
 

@@ -38,17 +38,19 @@ looked at — and talked to — without merging:
 
 ```
 git push -u origin my-branch
-→ https://unimatch-hiring.github.io/voice-lab/pr-preview/my-branch/
+→ https://unimatch-screening.github.io/voice-lab-previews/branch/my-branch/
 ```
 
 The link arrives on its own: as a comment on the pull request, as a deployment on the
 branch, and in the run's summary. Four previews live at once, and deleting the branch
 removes its own.
 
-A pull request from a fork gets one too, at `…/pr-preview/pr-<N>/`, linked from a comment
+A pull request from a fork gets one too, at `…/voice-lab-previews/pr-<N>/`, linked from a comment
 on the pull request and removed when it closes. The fork's code is built without any
 write access, and a separate job on `main` publishes the result as untrusted files. How
-and why that is safe: [docs/deploy.md](docs/deploy.md#fork-previews).
+and why that is safe: [docs/deploy.md](docs/deploy.md#fork-previews). Previews are served
+from another account's Pages, so unreviewed code never shares an origin with the admin
+page: [docs/deploy.md](docs/deploy.md#where-previews-live).
 
 ## How it fits together
 
