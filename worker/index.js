@@ -8,17 +8,25 @@ export { AddressGuard } from "./guard.js";
 /**
  * ALLOWED_ORIGINS is a comma-separated list in an environment variable, e.g.:
  *   "https://unimatch-hiring.github.io,http://localhost:5173"
+ * PREVIEW_ORIGINS is where pull request previews are served. Their code is unreviewed,
+ * so they get the candidate's endpoints and nothing under /admin/. An Origin header is
+ * trivial to forge outside a browser; this only keeps a preview page from driving the
+ * admin API through a visitor's browser.
  * We echo the request Origin back instead of writing `*`, so `Vary: Origin` is
  * mandatory: without it a CDN can serve a cached header to a different origin.
  */
+const CANDIDATE_PATHS = ["/engine", "/agent/token", "/deepgram-token"];
+
+const originList = (value) => (value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+function originAllowed(origin, path, env) {
+  if (originList(env.ALLOWED_ORIGINS).includes(origin)) return true;
+  return CANDIDATE_PATHS.includes(path) && originList(env.PREVIEW_ORIGINS).includes(origin);
+}
+
 function corsHeaders(req, env) {
   const origin = req.headers.get("origin") ?? "";
-  const allowed = (env.ALLOWED_ORIGINS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (!allowed.includes(origin)) return null;
+  if (!originAllowed(origin, new URL(req.url).pathname, env)) return null;
 
   return {
     "access-control-allow-origin": origin,

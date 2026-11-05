@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import worker, { AddressGuard } from "./index.js";
 import { ALERT_THRESHOLD, CODES_PER_DAY, MAX_TRIES } from "./guard.js";
@@ -173,6 +174,73 @@ describe("minting a session token", () => {
       env({ KEYS: undefined }),
     );
     expect(r.status).toBe(401);
+  });
+});
+
+describe("a pull request preview", () => {
+  // Previews run unreviewed code, so their origin must never reach the admin API.
+  const PREVIEW = "https://previews.example.test";
+  const withPreview = (over = {}) => env({ PREVIEW_ORIGINS: PREVIEW, ...over });
+
+  it("can mint a session token with an interview key", async () => {
+    stubElevenLabs();
+    const r = await worker.fetch(
+      req("/agent/token", { origin: PREVIEW, headers: { "x-vibe-token": "vibe_el" } }),
+      withPreview(),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it("can ask which engine its key is set to", async () => {
+    const r = await worker.fetch(
+      req("/engine", { origin: PREVIEW, headers: { "x-vibe-token": "vibe_el" } }),
+      withPreview(),
+    );
+    expect(await r.json()).toEqual({ engine: "elevenlabs" });
+  });
+
+  it("is refused by the admin API even with a live session", async () => {
+    const e = withPreview();
+    const r = await worker.fetch(
+      req("/admin/keys", { origin: PREVIEW, headers: await signIn(e.KEYS), body: { hours: 4 } }),
+      e,
+    );
+    expect(r.status).toBe(403);
+  });
+
+  it("issues no key when refused by the admin API", async () => {
+    const e = withPreview();
+    await worker.fetch(
+      req("/admin/keys", { origin: PREVIEW, headers: await signIn(e.KEYS), body: { hours: 4 } }),
+      e,
+    );
+    expect([...e.KEYS.store.keys()].filter((k) => k.startsWith("key:"))).toEqual(Object.keys(LIVE_KEYS));
+  });
+
+  it("gets no CORS confirmation for an admin preflight", async () => {
+    const r = await worker.fetch(req("/admin/verify", { method: "OPTIONS", origin: PREVIEW }), withPreview());
+    expect(r.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("cannot start an admin sign-in", async () => {
+    const r = await worker.fetch(
+      req("/admin/signin", { origin: PREVIEW, body: { email: "admin@example.com" } }),
+      withPreview(),
+    );
+    expect(r.status).toBe(403);
+  });
+
+  it("is deployed as a preview origin, not as one trusted with the admin API", () => {
+    const toml = readFileSync(`${process.cwd()}/worker/wrangler.toml`, "utf8");
+    const listed = (name) => toml.match(new RegExp(`^${name} = "(.*)"$`, "m"))[1].split(",");
+    const previews = listed("PREVIEW_ORIGINS");
+    expect(previews.filter((o) => listed("ALLOWED_ORIGINS").includes(o))).toEqual([]);
+  });
+
+  it("leaves the main site's admin API working", async () => {
+    const e = withPreview();
+    const r = await worker.fetch(req("/admin/keys", { method: "GET", headers: await signIn(e.KEYS) }), e);
+    expect(r.status).toBe(200);
   });
 });
 
