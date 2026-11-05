@@ -8,8 +8,9 @@ import { STAGE_ORDER, type StageName, type TurnMetrics } from "../lib/types";
  * claim is honest per-stage timings, the numbers have to survive the run — this is
  * where they land.
  *
- * Bars are shares of the total, not absolute milliseconds: the interesting thing is
- * which stage dominates a turn, and that reads instantly from width.
+ * Bars are shares of the turn's wall-clock time, not absolute milliseconds: the interesting
+ * thing is which stage dominates a turn, and that reads instantly from width. Stages overlap,
+ * so the shares can add up to more than 100%.
  */
 export function StageBreakdown({ metrics }: { metrics: TurnMetrics | null }) {
   if (!metrics) {
@@ -21,7 +22,8 @@ export function StageBreakdown({ metrics }: { metrics: TurnMetrics | null }) {
   }
 
   const measured = STAGE_ORDER.filter((s) => metrics.stages[s] !== undefined);
-  const total = measured.reduce((sum, s) => sum + (metrics.stages[s] ?? 0), 0);
+  // Not the sum of the stages: they overlap, and the sum counts that time twice.
+  const total = metrics.totalMs;
   const slowest = measured.reduce<StageName | null>(
     (worst, s) =>
       worst === null || (metrics.stages[s] ?? 0) > (metrics.stages[worst] ?? 0) ? s : worst,

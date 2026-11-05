@@ -20,7 +20,7 @@ test("unsubscribe stops delivery", () => {
 
   bus.emit({ type: "turn-start", at: 0 });
   off();
-  bus.emit({ type: "turn-end", at: 1, metrics: { stages: {}, llmTokens: 0, ttsChars: 0 } });
+  bus.emit({ type: "turn-end", at: 1, metrics: { stages: {}, totalMs: 0, llmTokens: 0, ttsChars: 0 } });
 
   expect(seen).toHaveLength(1);
 });
