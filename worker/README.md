@@ -36,12 +36,12 @@ Live since 13.08.2026: the namespace is bound in `wrangler.toml`.
 
 | | |
 |---|---|
-| `POST /admin/keys` | issue one; body `{hours, label}`, capped at 24h |
-| `GET /admin/keys` | list the live ones |
-| `DELETE /admin/keys/:token` | revoke immediately |
-| `PATCH /admin/keys/:token` | switch the key's engine, body `{engine}`; the expiry stays |
+| `POST /admin/keys` | issue one; body `{hours, label}`, capped at 24h and at 30 keys an hour per admin; the only answer with the full key |
+| `GET /admin/keys` | list the live ones: `id` and a masked `hint`, never the key |
+| `DELETE /admin/keys/:id` | revoke immediately; `id` is the SHA-256 of the key |
+| `PATCH /admin/keys/:id` | switch the key's engine, body `{engine}`; the expiry stays |
 
-All three need `x-admin-session` — a session from the sign-in below. A key handed to a
+All four need `x-admin-session` — a session from the sign-in below. A key handed to a
 candidate never opens them; otherwise the candidate could issue more.
 
 With Slack down nobody can sign in to issue one; a key can still be written straight into
@@ -55,13 +55,14 @@ wrangler kv key put --binding KEYS --remote --ttl 14400 "key:vibe_<random>" \
 ## Signing in
 
 There is no admin password to pass around. The interviewer types their work email on
-`?admin`, the Slack bot DMs them a code, and the code buys a 12-hour session.
+`?admin`, the Slack bot DMs them a code, and the code buys a 4-hour session.
 
 | | |
 |---|---|
 | `POST /admin/signin` | `{email}` → always `{ok: true}` |
 | `POST /admin/verify` | `{email, code}` → `{session, email}` |
-| `GET/POST /admin/people`, `DELETE /admin/people/:email` | the allowlist |
+| `POST /admin/signout` | ends the session in `x-admin-session` |
+| `GET/POST /admin/people`, `DELETE /admin/people/:email` | the allowlist; nobody can remove themselves or the last admin |
 
 `SLACK_BOT_TOKEN` is a Worker secret, shared with Hermes. The Worker calls one Slack
 method, `chat.postMessage`, so `chat:write` is the only scope it depends on.

@@ -1,7 +1,8 @@
 import {
-  requestCode, verifyCode, sessionEmail, listPeople, addPerson, removePerson,
+  requestCode, verifyCode, sessionEmail, endSession, listPeople, addPerson, removePerson,
   clientIp, withinLimit, sha256,
 } from "./signin.js";
+import { guard } from "./guard.js";
 
 export { AddressGuard } from "./guard.js";
 
@@ -95,12 +96,34 @@ function bootstrapAllowed(req, env) {
   return Boolean(env.ADMIN_TOKEN) && secretEquals(req.headers.get("x-admin-token") ?? "", env.ADMIN_TOKEN);
 }
 
-async function issueInterviewKey(req, env, json) {
+/**
+ * What the list shows instead of the key: enough to tell two apart on screen, not enough
+ * to use. A list readable by anyone holding a session would otherwise hand out every live key.
+ */
+function keyHint(token) {
+  const prefix = token.startsWith("vibe_") ? "vibe_" : "";
+  const body = token.slice(prefix.length);
+  if (body.length <= 8) return `${prefix}…`;
+  return `${prefix}${body.slice(0, 4)}…${body.slice(-4)}`;
+}
+
+/** The KV name of the key whose id this is, or null. Keys are few and short-lived, so a scan will do. */
+async function keyNameById(id, env) {
+  const { keys } = await env.KEYS.list({ prefix: "key:" });
+  for (const { name } of keys) {
+    if ((await sha256(name.slice("key:".length))) === id) return name;
+  }
+  return null;
+}
+
+async function issueInterviewKey(req, env, json, who) {
   const body = await req.json().catch(() => ({}));
   const hours = Number(body.hours) || DEFAULT_TTL_HOURS;
   if (!(hours > 0) || hours > MAX_TTL_HOURS) {
     return json({ error: `hours must be between 0 and ${MAX_TTL_HOURS}` }, 400);
   }
+  // Counted exactly, per person: Cloudflare's limiter has no window longer than a minute.
+  if (!(await guard(env, who, "mint")).ok) return json({ error: "too many keys this hour" }, 429);
 
   const label = typeof body.label === "string" ? body.label.slice(0, 80) : "";
   const engine = engineOf(body.engine);
@@ -114,26 +137,37 @@ async function issueInterviewKey(req, env, json) {
 
   await env.KEYS.put(`key:${token}`, JSON.stringify(record), { expirationTtl: ttlSeconds });
 
-  return json({ token, ...record });
+  // The only time the full key leaves the Worker: it has to reach the candidate.
+  return json({ token, id: await sha256(token), hint: keyHint(token), ...record });
 }
 
 /**
  * Moves a live key to the other engine, e.g. when ElevenLabs is down mid-session. The
  * record is rewritten with what is left of its lifetime, so switching never extends a key.
  */
-async function setKeyEngine(token, req, env, json) {
+async function setKeyEngine(id, req, env, json) {
   const body = await req.json().catch(() => ({}));
   if (!ENGINES.includes(body.engine)) {
     return json({ error: `engine must be one of ${ENGINES.join(", ")}` }, 400);
   }
-  const raw = await env.KEYS.get(`key:${token}`);
-  if (raw === null) return json({ error: "no such key" }, 404);
+  const name = await keyNameById(id, env);
+  const raw = name && (await env.KEYS.get(name));
+  if (!raw) return json({ error: "no such key" }, 404);
   const stored = JSON.parse(raw);
   const leftSeconds = Math.round(((stored.expiresAt ?? 0) - Date.now()) / 1000);
   if (leftSeconds < MIN_TTL_SECONDS) return json({ error: "key is about to expire" }, 409);
   const record = { ...stored, engine: body.engine };
-  await env.KEYS.put(`key:${token}`, JSON.stringify(record), { expirationTtl: leftSeconds });
-  return json({ token, engine: record.engine });
+  await env.KEYS.put(name, JSON.stringify(record), { expirationTtl: leftSeconds });
+  return json({ id, engine: record.engine });
+}
+
+async function revokeKey(id, env, json) {
+  // Reported rather than assumed: KV deletes a missing key without complaint, and a
+  // revocation that quietly did nothing would leave a working credential behind.
+  const name = await keyNameById(id, env);
+  if (!name) return json({ error: "no such key" }, 404);
+  await env.KEYS.delete(name);
+  return json({ revoked: id });
 }
 
 async function listInterviewKeys(env, json) {
@@ -145,8 +179,10 @@ async function listInterviewKeys(env, json) {
       // Defaults rather than a spread of whatever is stored: a record written by an older
       // version, or a hand-made KV entry, otherwise reaches the page without expiresAt and
       // renders as "NaNm left".
+      const token = name.slice("key:".length);
       return {
-        token: name.slice("key:".length),
+        id: await sha256(token),
+        hint: keyHint(token),
         label: stored.label ?? "",
         engine: engineOf(stored.engine),
         issuedAt: stored.issuedAt ?? 0,
@@ -187,6 +223,10 @@ export default {
       if (!env.KEYS) return json({ error: "not found" }, 404);
       return verifyCode(req, env, json, ctx);
     }
+    if (path === "/admin/signout" && req.method === "POST") {
+      if (!env.KEYS) return json({ error: "not found" }, 404);
+      return endSession(req, env, json);
+    }
 
     if (path.startsWith("/admin/")) {
       if (!env.KEYS) return json({ error: "not found" }, 404);
@@ -203,32 +243,19 @@ export default {
         if (req.method === "POST") return addPerson(req, env, json);
       }
       if (req.method === "DELETE" && path.startsWith("/admin/people/")) {
-        return removePerson(decodeURIComponent(path.slice("/admin/people/".length)), env, json);
+        return removePerson(decodeURIComponent(path.slice("/admin/people/".length)), who, env, json);
       }
-    }
 
-    if (path.startsWith("/admin/keys")) {
-
-      if (req.method === "POST" && path === "/admin/keys") return issueInterviewKey(req, env, json);
-      if (req.method === "GET" && path === "/admin/keys") return listInterviewKeys(env, json);
-      if (req.method === "PATCH") {
-        const token = decodeURIComponent(path.slice("/admin/keys/".length));
-        if (!token) return json({ error: "token required" }, 400);
-        return setKeyEngine(token, req, env, json);
+      if (path.startsWith("/admin/keys")) {
+        if (req.method === "POST" && path === "/admin/keys") return issueInterviewKey(req, env, json, who);
+        if (req.method === "GET" && path === "/admin/keys") return listInterviewKeys(env, json);
+        // Keys are named by id, never by the key itself, so the key never sits in a URL or a log.
+        const id = decodeURIComponent(path.slice("/admin/keys/".length));
+        if (!id) return json({ error: "key id required" }, 400);
+        if (req.method === "PATCH") return setKeyEngine(id, req, env, json);
+        if (req.method === "DELETE") return revokeKey(id, env, json);
+        return json({ error: "method not allowed" }, 405);
       }
-      if (req.method === "DELETE") {
-        // The client percent-encodes the token, so the raw pathname would delete a key
-        // spelled differently from the one that exists.
-        const token = decodeURIComponent(path.slice("/admin/keys/".length));
-        if (!token) return json({ error: "token required" }, 400);
-        // Reported rather than assumed: KV deletes a missing key without complaint, and a
-        // revocation that quietly did nothing would leave a working credential behind.
-        const existed = (await env.KEYS.get(`key:${token}`)) !== null;
-        if (!existed) return json({ error: "no such key" }, 404);
-        await env.KEYS.delete(`key:${token}`);
-        return json({ revoked: token });
-      }
-      return json({ error: "method not allowed" }, 405);
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);

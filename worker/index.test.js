@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import worker, { AddressGuard } from "./index.js";
-import { ALERT_THRESHOLD, CODES_PER_DAY, MAX_TRIES } from "./guard.js";
+import { ALERT_THRESHOLD, CODES_PER_DAY, KEYS_PER_HOUR, MAX_TRIES } from "./guard.js";
 
 const ORIGIN = "http://localhost:5173";
 
@@ -95,7 +95,7 @@ async function sha256(text) {
 /** Puts an address on the list and gives it a live session; returns the header for it. */
 async function signIn(kv, email = "stas@unimatch.ai") {
   await kv.put(`admin:${email}`, "U0STAS");
-  await kv.put(`sess:${await sha256(SESSION)}`, email);
+  await kv.put(`sess2:${await sha256(SESSION)}`, email);
   return { "x-admin-session": SESSION };
 }
 
@@ -342,7 +342,7 @@ describe("choosing the engine", () => {
     await e.KEYS.put("key:vibe_k", JSON.stringify({ label: "c", engine: "elevenlabs", issuedAt: 1, expiresAt }));
 
     const r = await worker.fetch(
-      req("/admin/keys/vibe_k", { method: "PATCH", headers, body: { engine: "deepgram" } }),
+      req(`/admin/keys/${await sha256("vibe_k")}`, { method: "PATCH", headers, body: { engine: "deepgram" } }),
       e,
     );
 
@@ -358,7 +358,7 @@ describe("choosing the engine", () => {
     const headers = await signIn(e.KEYS);
     await e.KEYS.put("key:vibe_k", JSON.stringify({ expiresAt: Date.now() + 3600_000 }));
     const r = await worker.fetch(
-      req("/admin/keys/vibe_k", { method: "PATCH", headers, body: { engine: "openai" } }),
+      req(`/admin/keys/${await sha256("vibe_k")}`, { method: "PATCH", headers, body: { engine: "openai" } }),
       e,
     );
     expect(r.status).toBe(400);
@@ -478,20 +478,20 @@ describe("listing and revoking", () => {
       e,
     );
 
-    const [key] = (await r.json()).keys.filter((k) => k.token.startsWith("vibe_"));
+    const [key] = (await r.json()).keys.filter((k) => k.hint.startsWith("vibe_"));
     expect(Number.isFinite(key.expiresAt)).toBe(true);
     expect(Number.isFinite(key.issuedAt)).toBe(true);
   });
 
-  it("revokes the key the caller named, not its percent-encoded spelling", async () => {
-    const e = env({ KEYS: fakeKv({ "key:vibe_a/b": "{}" }) });
+  it("revokes the key its id names", async () => {
+    const e = env({ KEYS: fakeKv({ "key:vibe_abc": "{}", "key:vibe_other": "{}" }) });
     const r = await worker.fetch(
-      req("/admin/keys/vibe_a%2Fb", { method: "DELETE", headers: await signIn(e.KEYS) }),
+      req(`/admin/keys/${await sha256("vibe_abc")}`, { method: "DELETE", headers: await signIn(e.KEYS) }),
       e,
     );
 
     expect(r.status).toBe(200);
-    expect(e.KEYS.store.has("key:vibe_a/b")).toBe(false);
+    expect([...e.KEYS.store.keys()].filter((k) => k.startsWith("key:"))).toEqual(["key:vibe_other"]);
   });
 
   it("says so when there was nothing to revoke, instead of reporting success", async () => {
@@ -507,7 +507,7 @@ describe("listing and revoking", () => {
   it("revoking removes the key, and the holder immediately loses access", async () => {
     const e = env({ KEYS: fakeKv({ "key:vibe_abc": "{}" }) });
     await worker.fetch(
-      req("/admin/keys/vibe_abc", { method: "DELETE", headers: await signIn(e.KEYS) }),
+      req(`/admin/keys/${await sha256("vibe_abc")}`, { method: "DELETE", headers: await signIn(e.KEYS) }),
       e,
     );
 
@@ -630,6 +630,14 @@ describe("signing in by code", () => {
     expect([...e.KEYS.store.values()]).not.toContain(body.session);
   });
 
+  it("lets a session live four hours, not a whole day", async () => {
+    const e = env();
+    await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
+    const { body } = await signInFor(LISTED, e);
+
+    expect(e.KEYS.ttls.get(`sess2:${await sha256(body.session)}`)).toBe(4 * 3600);
+  });
+
   it("burns the code after five wrong guesses", async () => {
     const e = env();
     await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
@@ -658,6 +666,7 @@ describe("signing in by code", () => {
   it("locks out a live session the moment the person leaves the list", async () => {
     const e = env();
     await e.KEYS.put(`admin:${LISTED}`, "U0STAS");
+    await e.KEYS.put("admin:second@example.com", "U0SECOND");
     const { body } = await signInFor(LISTED, e);
     const headers = { "x-admin-session": body.session };
 
@@ -907,5 +916,171 @@ describe("counting sign-in attempts", () => {
       await worker.fetch(req("/admin/verify", { body: { email: "nobody@x.test", code: "1" } }), e);
     }
     expect(e.GUARD.objects.get("nobody@x.test").store.get("failures")).toBeUndefined();
+  });
+});
+
+describe("signing out", () => {
+  const signOut = (headers, e) => worker.fetch(req("/admin/signout", { headers }), e);
+  const listKeys = (headers, e) => worker.fetch(req("/admin/keys", { method: "GET", headers }), e);
+
+  it("kills the session on the server, so a copy of the token stops working", async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS);
+
+    await signOut(headers, e);
+
+    expect((await listKeys(headers, e)).status).toBe(401);
+  });
+
+  it("leaves other people's sessions alone", async () => {
+    const e = env();
+    const mine = await signIn(e.KEYS);
+    await e.KEYS.put("admin:other@example.com", "U0OTHER");
+    await e.KEYS.put(`sess2:${await sha256("other-session")}`, "other@example.com");
+
+    await signOut(mine, e);
+
+    expect((await listKeys({ "x-admin-session": "other-session" }, e)).status).toBe(200);
+  });
+
+  it("answers a dead or missing session without error, so the page can always clear itself", async () => {
+    const r = await signOut({ "x-admin-session": "never-issued" }, env());
+    expect(r.status).toBe(200);
+  });
+
+  it("does not honour sessions stored before the prefix change: a deploy signs everyone out", async () => {
+    const e = env();
+    await e.KEYS.put("admin:old@example.com", "U0OLD");
+    await e.KEYS.put(`sess:${await sha256("old-session")}`, "old@example.com");
+
+    expect((await listKeys({ "x-admin-session": "old-session" }, e)).status).toBe(401);
+  });
+});
+
+describe("the key list never carries a usable key", () => {
+  async function issueAndList() {
+    const e = env({ KEYS: fakeKv() });
+    const headers = await signIn(e.KEYS);
+    const issued = await (await worker.fetch(req("/admin/keys", { headers, body: {} }), e)).json();
+    const listed = await (await worker.fetch(req("/admin/keys", { method: "GET", headers }), e)).json();
+    return { e, headers, issued, listed };
+  }
+
+  it("hands the full key out once, on issue", async () => {
+    const { issued } = await issueAndList();
+    expect(issued.token).toMatch(/^vibe_[0-9a-f]{48}$/);
+  });
+
+  it("lists the key without the key itself anywhere in the answer", async () => {
+    const { issued, listed } = await issueAndList();
+    expect(JSON.stringify(listed)).not.toContain(issued.token.slice(5));
+  });
+
+  it("shows the first and last four characters, enough to tell keys apart", async () => {
+    const { issued, listed } = await issueAndList();
+    const body = issued.token.slice(5);
+    expect(listed.keys[0].hint).toBe(`vibe_${body.slice(0, 4)}…${body.slice(-4)}`);
+  });
+
+  it("names the issued key by the same id the list uses", async () => {
+    const { issued, listed } = await issueAndList();
+    expect(listed.keys[0].id).toBe(issued.id);
+  });
+
+  it("will not revoke by the full key in the path, only by its id", async () => {
+    const { e, headers, issued } = await issueAndList();
+    const r = await worker.fetch(
+      req(`/admin/keys/${issued.token}`, { method: "DELETE", headers }),
+      e,
+    );
+    expect(r.status).toBe(404);
+  });
+
+  it("will not switch an engine by the full key in the path, only by its id", async () => {
+    const { e, headers, issued } = await issueAndList();
+    const r = await worker.fetch(
+      req(`/admin/keys/${issued.token}`, { method: "PATCH", headers, body: { engine: "deepgram" } }),
+      e,
+    );
+    expect(r.status).toBe(404);
+  });
+});
+
+describe("limits on issuing keys", () => {
+  const issue = (headers, e) => worker.fetch(req("/admin/keys", { headers, body: {} }), e);
+
+  it(`stops one admin after ${KEYS_PER_HOUR} keys in an hour`, async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS);
+    for (let i = 0; i < KEYS_PER_HOUR; i++) expect((await issue(headers, e)).status).toBe(200);
+
+    expect((await issue(headers, e)).status).toBe(429);
+  });
+
+  it("stores no key when the limit refuses", async () => {
+    const e = env({ KEYS: fakeKv() });
+    const headers = await signIn(e.KEYS);
+    for (let i = 0; i <= KEYS_PER_HOUR; i++) await issue(headers, e);
+
+    expect([...e.KEYS.store.keys()].filter((k) => k.startsWith("key:"))).toHaveLength(KEYS_PER_HOUR);
+  });
+
+  it("counts each admin apart", async () => {
+    const e = env();
+    const first = await signIn(e.KEYS, "first@example.com");
+    for (let i = 0; i < KEYS_PER_HOUR; i++) await issue(first, e);
+    await e.KEYS.put("admin:second@example.com", "U0SECOND");
+    await e.KEYS.put(`sess2:${await sha256("second-session")}`, "second@example.com");
+
+    expect((await issue({ "x-admin-session": "second-session" }, e)).status).toBe(200);
+  });
+
+  it("lets the count drain after an hour", async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS);
+    const t0 = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(t0);
+    for (let i = 0; i < KEYS_PER_HOUR; i++) await issue(headers, e);
+
+    clock.mockReturnValue(t0 + 3600_000 + 1);
+    expect((await issue(headers, e)).status).toBe(200);
+  });
+});
+
+describe("removing admins", () => {
+  const remove = (email, headers, e) =>
+    worker.fetch(req(`/admin/people/${encodeURIComponent(email)}`, { method: "DELETE", headers }), e);
+
+  it("will not let an admin remove themselves", async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS, "me@example.com");
+    await e.KEYS.put("admin:other@example.com", "U0OTHER");
+
+    expect((await remove("me@example.com", headers, e)).status).toBe(409);
+  });
+
+  it("will not remove the last admin, even with the bootstrap password", async () => {
+    const e = env();
+    await e.KEYS.put("admin:only@example.com", "U0ONLY");
+
+    const r = await remove("only@example.com", { "x-admin-token": "admin-secret" }, e);
+
+    expect(r.status).toBe(409);
+  });
+
+  it("keeps the last admin on the list when refused", async () => {
+    const e = env();
+    await e.KEYS.put("admin:only@example.com", "U0ONLY");
+    await remove("only@example.com", { "x-admin-token": "admin-secret" }, e);
+
+    expect(e.KEYS.store.has("admin:only@example.com")).toBe(true);
+  });
+
+  it("still removes someone else while others remain", async () => {
+    const e = env();
+    const headers = await signIn(e.KEYS, "me@example.com");
+    await e.KEYS.put("admin:other@example.com", "U0OTHER");
+
+    expect((await remove("other@example.com", headers, e)).status).toBe(200);
   });
 });

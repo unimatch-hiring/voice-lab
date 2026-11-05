@@ -18,6 +18,10 @@ const DAY_MS = 24 * 60 * MINUTE;
 export const ALERT_THRESHOLD = 10;
 export const ALERT_WINDOW_MS = 10 * MINUTE;
 
+/** Interview keys one admin may issue per hour: a day of interviews, not a stolen session's script. */
+export const KEYS_PER_HOUR = 30;
+const HOUR_MS = 60 * MINUTE;
+
 const recent = (stamps, now, window) => (stamps ?? []).filter((t) => now - t < window);
 
 /** Time between the last alert and now has to cover a whole window before the next one. */
@@ -76,7 +80,15 @@ function failure(store, now, reason) {
   return { ok: false, reason, alert: shouldAlert(store, failures.length, now) ? failures.length : 0 };
 }
 
-const OPS = { issue, verify };
+/** Counts one key issued by this address, unless it is already at the hourly cap. */
+export function mint(store, { now }) {
+  const minted = recent(store.get("minted"), now, HOUR_MS);
+  if (minted.length >= KEYS_PER_HOUR) return { ok: false };
+  store.put("minted", [...minted, now]);
+  return { ok: true };
+}
+
+const OPS = { issue, verify, mint };
 
 /**
  * Plain class with a fetch handler rather than an RPC subclass: `DurableObject` comes from
