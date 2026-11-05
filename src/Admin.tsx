@@ -6,6 +6,7 @@ import {
   requestCode,
   verifyCode,
   type InterviewKey,
+  type IssuedKey,
 } from "./lib/adminKeys";
 import { loadConfig } from "./lib/config";
 import { ENGINE_LABEL } from "./lib/engine";
@@ -36,7 +37,7 @@ export function Admin() {
   const [label, setLabel] = useState("");
   const [engine, setEngine] = useState<Engine>("elevenlabs");
   /** The key just minted, held apart from the list so it can be shown big and copied. */
-  const [fresh, setFresh] = useState<InterviewKey | null>(null);
+  const [fresh, setFresh] = useState<IssuedKey | null>(null);
   const [copied, setCopied] = useState(false);
   // Re-rendered once a minute so "3h 40m left" does not quietly go stale on screen.
   const [now, setNow] = useState(() => Date.now());
@@ -96,18 +97,18 @@ export function Admin() {
       setKeys(await client.list());
     });
 
-  const revoke = (token: string) =>
+  const revoke = (id: string) =>
     run(async () => {
       const client = createAdminClient(workerUrl, session);
-      await client.revoke(token);
-      if (fresh?.token === token) setFresh(null);
+      await client.revoke(id);
+      if (fresh?.id === id) setFresh(null);
       setKeys(await client.list());
     });
 
   const switchEngine = (k: InterviewKey) =>
     run(async () => {
       const client = createAdminClient(workerUrl, session);
-      await client.setEngine(k.token, k.engine === "deepgram" ? "elevenlabs" : "deepgram");
+      await client.setEngine(k.id, k.engine === "deepgram" ? "elevenlabs" : "deepgram");
       setKeys(await client.list());
     });
 
@@ -116,7 +117,9 @@ export function Admin() {
     setCopied(true);
   };
 
-  const signOut = () => {
+  const signOut = async () => {
+    // Local state goes regardless: a Worker that cannot be reached must not keep us signed in here.
+    await createAdminClient(workerUrl, session).signOut().catch(() => undefined);
     clearAdminToken();
     setAuthed(false);
     setSession("");
@@ -288,9 +291,9 @@ export function Admin() {
           ) : (
             <ul className="admin-list">
               {keys.map((k) => (
-                <li key={k.token}>
+                <li key={k.id}>
                   <span className="admin-who">{k.label || "unnamed"}</span>
-                  <code className="admin-token">{k.token}</code>
+                  <code className="admin-token">{k.hint}</code>
                   <span className="admin-left">{formatRemaining(k.expiresAt, now)}</span>
                   <span className="admin-engine" data-engine={k.engine}>
                     {ENGINE_LABEL[k.engine]}
@@ -303,7 +306,7 @@ export function Admin() {
                   >
                     Switch to {ENGINE_LABEL[k.engine === "deepgram" ? "elevenlabs" : "deepgram"]}
                   </button>
-                  <button className="admin-link" type="button" onClick={() => revoke(k.token)}>
+                  <button className="admin-link" type="button" onClick={() => revoke(k.id)}>
                     Revoke
                   </button>
                 </li>

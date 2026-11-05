@@ -7,6 +7,8 @@ export const STAGE_ORDER: readonly StageName[] = [
 /** Per-stage TTFB + usage for one conversational turn. Shape carried over from voice-poc. */
 export interface TurnMetrics {
   stages: Partial<Record<StageName, number>>;
+  /** Wall-clock time the turn's stages covered; less than their sum when they overlap. */
+  totalMs: number;
   llmTokens: number;
   ttsChars: number;
 }

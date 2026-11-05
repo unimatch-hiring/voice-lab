@@ -1,6 +1,7 @@
 import { Conversation } from "@elevenlabs/client";
 import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
+import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
 import type { SessionDeps, VoiceSession } from "./session";
 
@@ -30,7 +31,9 @@ export class AgentSession implements VoiceSession {
   /** When the current stage opened, so its duration can be reported on close. */
   private stageAt = 0;
   private stage: StageName | null = null;
-  private metrics: TurnMetrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
+  private metrics: TurnMetrics = { stages: {}, totalMs: 0, llmTokens: 0, ttsChars: 0 };
+  /** Every closed stage of this turn, for the wall-clock total. */
+  private intervals: [number, number][] = [];
   /** Reply text already shown token by token, so the final message is not repeated. */
   private streamedReply = "";
   /** Lanes opened outside the mode machine — vad, stt and tts overlap the main stages. */
@@ -199,6 +202,7 @@ export class AgentSession implements VoiceSession {
     this.lanes.delete(stage);
     this.deps.bus.emit({ type: "stage-end", stage, at, ttfbMs: 0 });
     this.metrics.stages[stage] = (this.metrics.stages[stage] ?? 0) + (at - started);
+    this.intervals.push([started, at]);
   }
 
   /** Closes the previous stage, reporting its duration, and opens the next one. */
@@ -209,11 +213,16 @@ export class AgentSession implements VoiceSession {
       this.deps.bus.emit({ type: "stage-end", stage: this.stage, at: now, ttfbMs: 0 });
       this.metrics.stages[this.stage] =
         (this.metrics.stages[this.stage] ?? 0) + (now - this.stageAt);
+      this.intervals.push([this.stageAt, now]);
 
       if (next === "capture") {
-        this.deps.onTurn(this.metrics);
+        this.deps.onTurn({ ...this.metrics, totalMs: coveredMs(this.intervals) });
         this.resetTurn();
       }
+    }
+    // Per-turn readouts such as the token counter start over from here.
+    if (next === "capture" && this.stage !== next) {
+      this.deps.bus.emit({ type: "turn-start", at: now });
     }
 
     if (next && this.stage !== next) {
@@ -234,7 +243,8 @@ export class AgentSession implements VoiceSession {
   }
 
   private resetTurn(): void {
-    this.metrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
+    this.metrics = { stages: {}, totalMs: 0, llmTokens: 0, ttsChars: 0 };
+    this.intervals = [];
     this.lanes.clear();
     this.vadOpen = false;
   }

@@ -52,6 +52,15 @@ describe("admin client", () => {
     expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body)).engine).toBe("deepgram");
   });
 
+  it("signs out on the Worker with the session it holds", async () => {
+    const fetchImpl = okJson({ ok: true });
+    await createAdminClient(URL_BASE, "session-1", fetchImpl).signOut();
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect([String(url), init?.method]).toEqual([`${URL_BASE}/admin/signout`, "POST"]);
+    expect((init?.headers as Record<string, string>)["x-admin-session"]).toBe("session-1");
+  });
+
   it("escapes the token in the revoke path, so a stray character cannot reshape the URL", async () => {
     const fetchImpl = okJson({ revoked: "x" });
     await createAdminClient(URL_BASE, "secret", fetchImpl).revoke("vibe_a/../b");

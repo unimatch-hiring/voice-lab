@@ -68,6 +68,18 @@ export function App() {
   const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [talking, setTalking] = useState(false);
+  /** A start is in flight: each one opens a paid session, so a second press must not. */
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
+  /** Bumped on teardown, so a start that resolves afterwards knows its session was abandoned. */
+  const generationRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   /** Who ended the last conversation, so the transport row can say so. */
   const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
   // Detection knobs, adjustable between sessions from the settings panel.
@@ -152,6 +164,7 @@ export function App() {
   saveRecordingRef.current = recording ? saveRecording : null;
 
   const toggleConversation = async () => {
+    if (startingRef.current) return;
     setError(null);
     const running = sessionRef.current;
     if (running?.isRunning) {
@@ -161,6 +174,8 @@ export function App() {
       if (recording) saveRecording();
       return;
     }
+    startingRef.current = true;
+    setStarting(true);
     try {
       setEndedBy(null);
       if (recording) {
@@ -169,20 +184,31 @@ export function App() {
       }
       // An old Worker without the engine route means the default engine, not a failure.
       const current = await transport.engine().catch(() => "elevenlabs" as const);
+      if (!mountedRef.current) return;
       setEngine(current);
       engineRef.current = current;
+      const generation = generationRef.current;
       const session = createSession(current, sessionDeps);
       sessionRef.current = session;
       await session.start();
+      // Torn down mid-start: stop() then found nothing open yet, so the session is ours to close.
+      if (generation !== generationRef.current) {
+        await session.stop();
+        return;
+      }
       setTalking(true);
     } catch (e) {
       setError(startFailureMessage(e, engineRef.current));
       setTalking(false);
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   };
 
   useEffect(
     () => () => {
+      generationRef.current += 1;
       void sessionRef.current?.stop();
       sessionRef.current = null;
     },
@@ -243,7 +269,7 @@ export function App() {
               className="talk"
               data-talking={talking}
               onClick={toggleConversation}
-              disabled={config.offline}
+              disabled={config.offline || starting}
             >
               {talking ? "End conversation" : "Start conversation"}
             </button>

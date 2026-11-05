@@ -8,20 +8,31 @@
 
 import type { Engine } from "./pipeline/session";
 
+/** A key as the list shows it: the key itself never comes back after it is issued. */
 export interface InterviewKey {
-  token: string;
+  /** Stable handle for revoking or switching; not usable as a key. */
+  id: string;
+  /** The first and last few characters, to tell keys apart on screen. */
+  hint: string;
   label: string;
   engine: Engine;
   issuedAt: number;
   expiresAt: number;
 }
 
+/** What issuing returns: the only answer that carries the full key, to hand to the candidate. */
+export interface IssuedKey extends InterviewKey {
+  token: string;
+}
+
 export interface AdminClient {
-  issue(hours: number, label: string, engine?: Engine): Promise<InterviewKey>;
+  issue(hours: number, label: string, engine?: Engine): Promise<IssuedKey>;
   list(): Promise<InterviewKey[]>;
-  revoke(token: string): Promise<void>;
+  revoke(id: string): Promise<void>;
   /** Takes effect from the key's next conversation. */
-  setEngine(token: string, engine: Engine): Promise<void>;
+  setEngine(id: string, engine: Engine): Promise<void>;
+  /** Ends the session on the Worker, so a copy of it left anywhere stops working. */
+  signOut(): Promise<void>;
 }
 
 type FetchLike = typeof fetch;
@@ -85,7 +96,7 @@ export function createAdminClient(
         method: "POST",
         body: JSON.stringify({ hours, label, engine }),
       });
-      return (await r.json()) as InterviewKey;
+      return (await r.json()) as IssuedKey;
     },
 
     list: async () => {
@@ -93,15 +104,19 @@ export function createAdminClient(
       return ((await r.json()) as { keys: InterviewKey[] }).keys;
     },
 
-    revoke: async (token) => {
-      await call(`/admin/keys/${encodeURIComponent(token)}`, { method: "DELETE" });
+    revoke: async (id) => {
+      await call(`/admin/keys/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
 
-    setEngine: async (token, engine) => {
-      await call(`/admin/keys/${encodeURIComponent(token)}`, {
+    setEngine: async (id, engine) => {
+      await call(`/admin/keys/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify({ engine }),
       });
+    },
+
+    signOut: async () => {
+      await call("/admin/signout", { method: "POST" });
     },
   };
 }

@@ -17,8 +17,18 @@ import { guard } from "./guard.js";
  * keeps a script that requests code after code from getting anywhere.
  */
 const CODE_DIGITS = 8;
-/** A session covers a shift: an interview runs 80 minutes, and they come back to back. */
-const SESSION_TTL_SECONDS = 12 * 3600;
+/**
+ * Long enough for a block of back-to-back 80-minute interviews; past that a new Slack code
+ * is cheap, and a session lifted from a laptop is worth less the sooner it dies.
+ */
+export const SESSION_TTL_SECONDS = 4 * 3600;
+/**
+ * Bump the suffix to sign everyone out with a deploy: sessions under the old prefix are
+ * never read again and KV expires them on their own.
+ */
+const SESSION_PREFIX = "sess2:";
+
+const sessionKey = async (token) => `${SESSION_PREFIX}${await sha256(token)}`;
 
 const normalise = (email) => String(email ?? "").trim().toLowerCase();
 
@@ -163,7 +173,7 @@ export async function verifyCode(req, env, json, ctx) {
 
   const session = randomToken();
   // Hashed for the same reason the code is: KV contents must not be a way in.
-  await env.KEYS.put(`sess:${await sha256(session)}`, email, {
+  await env.KEYS.put(await sessionKey(session), email, {
     expirationTtl: SESSION_TTL_SECONDS,
   });
   return json({ session, email });
@@ -172,15 +182,25 @@ export async function verifyCode(req, env, json, ctx) {
 /**
  * Whose session this is, or null.
  *
- * The allowlist is consulted on every call, not just at sign-in: a session lives twelve
- * hours, and removing someone has to lock them out now rather than by this evening.
+ * The allowlist is consulted on every call, not just at sign-in: a session lives hours,
+ * and removing someone has to lock them out now rather than when it expires.
  */
 export async function sessionEmail(req, env) {
   const token = req.headers.get("x-admin-session") ?? "";
   if (!token || !env.KEYS) return null;
-  const email = await env.KEYS.get(`sess:${await sha256(token)}`);
+  const email = await env.KEYS.get(await sessionKey(token));
   if (!email) return null;
   return (await env.KEYS.get(`admin:${email}`)) === null ? null : email;
+}
+
+/**
+ * Forgets the caller's session. Answers the same whether or not it existed: holding the
+ * token is all the authority needed to end it, and a dead one has nothing to end.
+ */
+export async function endSession(req, env, json) {
+  const token = req.headers.get("x-admin-session") ?? "";
+  if (token) await env.KEYS.delete(await sessionKey(token));
+  return json({ ok: true });
 }
 
 /** Who has access — readable and editable only by someone signed in. */
@@ -206,9 +226,17 @@ export async function addPerson(req, env, json) {
   return json({ email, slack });
 }
 
-export async function removePerson(email, env, json) {
-  const key = `admin:${normalise(email)}`;
+/**
+ * Takes someone off the list. Never the caller and never the last one: either leaves the
+ * tool with nobody who can let anyone back in short of the bootstrap password.
+ */
+export async function removePerson(email, who, env, json) {
+  const target = normalise(email);
+  const key = `admin:${target}`;
   if ((await env.KEYS.get(key)) === null) return json({ error: "no such person" }, 404);
+  if (target === who) return json({ error: "you cannot remove yourself" }, 409);
+  const { keys } = await env.KEYS.list({ prefix: "admin:" });
+  if (keys.length <= 1) return json({ error: "cannot remove the last admin" }, 409);
   await env.KEYS.delete(key);
-  return json({ removed: normalise(email) });
+  return json({ removed: target });
 }

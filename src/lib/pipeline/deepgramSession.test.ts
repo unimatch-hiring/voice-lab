@@ -427,3 +427,16 @@ test("a denied microphone fails before a token is spent", async () => {
   await expect(session.start()).rejects.toThrow(/denied/);
   expect(deepgramToken).not.toHaveBeenCalled();
 });
+
+test("every new turn is announced, so per-turn readouts start over", async () => {
+  const { socket, audio, events } = await harness();
+  const starts = () => events.filter((e) => e.type === "turn-start").length;
+  const before = starts();
+
+  socket.emit({ type: "ConversationText", role: "user", content: "hi" });
+  socket.audio();
+  socket.emit({ type: "AgentAudioDone" });
+  audio.drain();
+
+  expect(starts()).toBe(before + 1);
+});

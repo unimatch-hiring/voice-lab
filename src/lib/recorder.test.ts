@@ -3,7 +3,7 @@ import { EventBus } from "./events";
 import { Recorder, fixtureFilename, toFixtureJson } from "./recorder";
 import type { TurnMetrics } from "./types";
 
-const METRICS: TurnMetrics = { stages: { llm: 120 }, llmTokens: 7, ttsChars: 42 };
+const METRICS: TurnMetrics = { stages: { llm: 120 }, totalMs: 120, llmTokens: 7, ttsChars: 42 };
 
 /** Clock doubles: a fixture must not depend on when the suite happens to run. */
 function recorder(times: number[] = []) {

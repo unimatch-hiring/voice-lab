@@ -1,8 +1,9 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { AgentSession } from "./agentSession";
 import { SYSTEM_PROMPT } from "../persona";
 import { EventBus } from "../events";
 import type { PipelineEvent, TurnMetrics } from "../types";
+import { TurnModel } from "../../scene/turnModel";
 
 /** Captures the callbacks the SDK would have received, so they can be fired by hand. */
 const handlers: Record<string, (arg?: unknown) => void> = {};
@@ -24,6 +25,8 @@ vi.mock("@elevenlabs/client", () => ({
     },
   },
 }));
+
+afterEach(() => vi.restoreAllMocks());
 
 async function harness() {
   const bus = new EventBus();
@@ -97,4 +100,40 @@ test("the role is sent with the handshake, not left to the agent's own prompt", 
     | { agent?: { prompt?: { prompt?: string } } }
     | undefined;
   expect(overrides?.agent?.prompt?.prompt).toBe(SYSTEM_PROMPT);
+});
+
+test("the token counter starts over on every turn instead of growing for the whole call", async () => {
+  const { events } = await harness();
+  const say = (text: string) => handlers.onAgentChatResponsePart?.({ text } as never);
+
+  handlers.onModeChange?.({ mode: "listening" } as never);
+  say("one ");
+  say("two ");
+  say("three");
+  handlers.onModeChange?.({ mode: "speaking" } as never);
+  handlers.onModeChange?.({ mode: "listening" } as never);
+  say("four");
+
+  const model = new TurnModel();
+  for (const e of events) model.apply(e);
+  expect(model.tokens).toBe(1);
+});
+
+test("end to end is the turn's wall-clock time, not the sum of overlapping stages", async () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  const { turns } = await harness();
+  const at = (t: number, fire: () => void) => {
+    now = t;
+    fire();
+  };
+
+  at(0, () => handlers.onModeChange?.({ mode: "listening" } as never));
+  at(100, () => handlers.onAsrInitiationMetadata?.());
+  at(500, () => handlers.onMessage?.({ message: "hi", source: "user" } as never));
+  at(800, () => handlers.onAudio?.());
+  at(800, () => handlers.onModeChange?.({ mode: "speaking" } as never));
+  at(2000, () => handlers.onModeChange?.({ mode: "listening" } as never));
+
+  expect(turns[0].totalMs).toBe(2000);
 });

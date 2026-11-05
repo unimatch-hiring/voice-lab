@@ -1,5 +1,6 @@
 import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
+import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
 import { createBrowserAudio, OUTPUT_RATE, type DeepgramAudio } from "./deepgramAudio";
 import type { SessionDeps, VoiceSession } from "./session";
@@ -61,7 +62,9 @@ export class DeepgramSession implements VoiceSession {
 
   private stageAt = 0;
   private stage: StageName | null = null;
-  private metrics: TurnMetrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
+  private metrics: TurnMetrics = { stages: {}, totalMs: 0, llmTokens: 0, ttsChars: 0 };
+  /** Every closed stage of this turn, for the wall-clock total. */
+  private intervals: [number, number][] = [];
   private lanes = new Map<StageName, number>();
   /** Agent audio is queued or playing. */
   private speaking = false;
@@ -338,6 +341,7 @@ export class DeepgramSession implements VoiceSession {
     this.lanes.delete(stage);
     this.deps.bus.emit({ type: "stage-end", stage, at, ttfbMs: 0 });
     this.metrics.stages[stage] = (this.metrics.stages[stage] ?? 0) + (at - started);
+    this.intervals.push([started, at]);
   }
 
   private openStage(next: StageName): void {
@@ -347,10 +351,15 @@ export class DeepgramSession implements VoiceSession {
       this.deps.bus.emit({ type: "stage-end", stage: this.stage, at: now, ttfbMs: 0 });
       this.metrics.stages[this.stage] =
         (this.metrics.stages[this.stage] ?? 0) + (now - this.stageAt);
+      this.intervals.push([this.stageAt, now]);
       if (next === "capture") {
-        this.deps.onTurn(this.metrics);
+        this.deps.onTurn({ ...this.metrics, totalMs: coveredMs(this.intervals) });
         this.resetTurn();
       }
+    }
+    // Per-turn readouts such as the token counter start over from here.
+    if (next === "capture") {
+      this.deps.bus.emit({ type: "turn-start", at: now });
     }
     this.deps.bus.emit({ type: "stage-start", stage: next, at: now });
     this.stageAt = now;
@@ -366,7 +375,8 @@ export class DeepgramSession implements VoiceSession {
   }
 
   private resetTurn(): void {
-    this.metrics = { stages: {}, llmTokens: 0, ttsChars: 0 };
+    this.metrics = { stages: {}, totalMs: 0, llmTokens: 0, ttsChars: 0 };
+    this.intervals = [];
     this.lanes.clear();
   }
 }
