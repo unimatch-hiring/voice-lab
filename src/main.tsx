@@ -2,11 +2,17 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Admin } from "./Admin";
 import { LipSyncBench } from "./bench/LipSyncBench";
+import { pickRoute } from "./lib/route";
 
-// Routes besides the instrument, and no router dependency to serve them: GitHub Pages
-// has no rewrites, so /admin is reached as ?admin — a real path would 404 before React runs.
-const route = new URLSearchParams(location.search);
+// Set by the preview workflows. A convenience only: a pull request can rewrite this file,
+// so what keeps previews away from the admin session is that they are served elsewhere.
+const preview = import.meta.env.VITE_PREVIEW === "1";
 
-createRoot(document.getElementById("root")!).render(
-  route.has("admin") ? <Admin /> : route.has("bench") ? <LipSyncBench /> : <App />,
-);
+const pages = {
+  app: () => <App />,
+  admin: () => <Admin />,
+  "admin-unavailable": () => <p>The admin page is not available in a preview.</p>,
+  bench: () => <LipSyncBench />,
+};
+
+createRoot(document.getElementById("root")!).render(pages[pickRoute(location.search, preview)]());
