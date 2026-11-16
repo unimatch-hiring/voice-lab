@@ -3,6 +3,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 
 vi.mock("./lib/tokenStore", () => ({
+  loadProfile: () => new Promise(() => {}),
+  saveProfile: () => Promise.resolve(),
   loadToken: () => Promise.resolve("vibe_test"),
   saveToken: () => Promise.resolve(),
 }));

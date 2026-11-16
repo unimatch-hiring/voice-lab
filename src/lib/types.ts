@@ -41,4 +41,6 @@ export type PipelineEvent =
   // Input audio level, ~100 Hz. Emitted by capture with a live mic; offline there
   // are no such events and the scene shows 0.
   | { type: "audio-level"; rms: number; at: number }
+  /** What a tool told the agent, so the transcript can tell its facts from guesses. */
+  | { type: "tool-result"; name: string; facts: string[] }
   | { type: "turn-end"; at: number; metrics: TurnMetrics };

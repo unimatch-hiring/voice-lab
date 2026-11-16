@@ -686,6 +686,24 @@ body {
   color: var(--rack-dim);
 }
 
+.transcript-legend {
+  display: inline-flex;
+  gap: 10px;
+  margin: 0 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Fact vs assumption in agent lines; the rack is dark in both themes, so fixed hues. */
+.mark-fact {
+  background: rgba(63, 185, 80, 0.18);
+  box-shadow: inset 0 -1px 0 #3fb950;
+}
+.mark-assumption {
+  background: rgba(255, 180, 84, 0.18);
+  box-shadow: inset 0 -1px 0 #ffb454;
+}
+
 /* Fixed height, scrolling inside: the conversation grows without moving anything
    else on the page. */
 .transcript-lines {

@@ -1,0 +1,51 @@
+.client-form {
+  display: grid;
+  gap: 12px;
+}
+
+.client-form label {
+  display: grid;
+  gap: 6px;
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.client-form input {
+  padding: 10px 12px;
+  font: 14px/1.2 var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+}
+
+.client-form input[aria-invalid="true"] {
+  border-color: var(--fail);
+}
+
+.client-form input:focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: 1px;
+}
+
+.client-form .field-error {
+  font: 12px/1.2 var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fail);
+}
+
+.client-form .form-download {
+  justify-self: start;
+  padding: 8px 12px;
+  font: 600 12px/1 var(--sans);
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+  cursor: pointer;
+}

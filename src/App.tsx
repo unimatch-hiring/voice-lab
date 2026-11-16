@@ -6,7 +6,11 @@ import { BACKUP_ENGINE_NOTICE } from "./lib/engine";
 import { createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
-import { loadToken, saveToken } from "./lib/tokenStore";
+import { loadProfile, loadToken, saveProfile, saveToken } from "./lib/tokenStore";
+import { briefing, EMPTY_PROFILE, type ClientProfile } from "./lib/formModel";
+import { makeTools } from "./lib/tools";
+import { supervise } from "./lib/supervisor";
+import { ClientForm } from "./ClientForm";
 import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
@@ -47,6 +51,14 @@ export function App() {
   // The first render is offline and flips to live mode once the token is read.
   const [storedToken, setStoredToken] = useState("");
   const [tokenReady, setTokenReady] = useState(false);
+  const [profile, setProfile] = useState<ClientProfile>(EMPTY_PROFILE);
+  // Tools read the form between renders: two update_form calls in one turn must see each other.
+  const profileRef = useRef(EMPTY_PROFILE);
+  const updateProfile = useCallback((next: ClientProfile) => {
+    profileRef.current = next;
+    setProfile(next);
+    void saveProfile(next);
+  }, []);
   const config = useMemo(() => loadConfig(storedToken), [storedToken]);
 
   useEffect(() => {
@@ -55,6 +67,11 @@ export function App() {
       if (!alive) return;
       setStoredToken(t);
       setTokenReady(true);
+    });
+    loadProfile().then((p) => {
+      if (!alive) return;
+      profileRef.current = p;
+      setProfile(p);
     });
     return () => {
       alive = false;
@@ -113,6 +130,7 @@ export function App() {
   }, [config, transport]);
 
   const sessionRef = useRef<VoiceSession | null>(null);
+  const unsuperviseRef = useRef<(() => void) | null>(null);
   /** The engine the last start attempt used, so its failure is worded for that engine. */
   const engineRef = useRef<Engine>("elevenlabs");
 
@@ -125,6 +143,8 @@ export function App() {
         recorder.addTurn(turn);
       },
       onEnded: (reason, message) => {
+        // A turn-end after the close would otherwise nudge a session that is already gone.
+        unsuperviseRef.current?.();
         setTalking(false);
         // The agent can hang up on its own, in which case the transport button is never
         // pressed — without this the recording of that conversation is simply lost.
@@ -137,8 +157,10 @@ export function App() {
         );
         setEndedBy(reason);
       },
+      functions: makeTools({ profile: () => profileRef.current, setProfile: updateProfile, report: (e) => bus.emit(e) }),
+      briefing: () => briefing(profileRef.current),
     };
-  }, [bus, transport, recorder]);
+  }, [bus, transport, recorder, updateProfile]);
 
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
@@ -168,6 +190,7 @@ export function App() {
     setError(null);
     const running = sessionRef.current;
     if (running?.isRunning) {
+      unsuperviseRef.current?.();
       await running.stop();
       setTalking(false);
       setEndedBy("user");
@@ -196,6 +219,13 @@ export function App() {
         await session.stop();
         return;
       }
+      unsuperviseRef.current?.();
+      unsuperviseRef.current = supervise({
+        bus,
+        profile: () => profileRef.current,
+        setProfile: updateProfile,
+        send: (text) => session.sendContextualUpdate(text),
+      });
       setTalking(true);
     } catch (e) {
       setError(startFailureMessage(e, engineRef.current));
@@ -209,10 +239,11 @@ export function App() {
   useEffect(
     () => () => {
       generationRef.current += 1;
+      unsuperviseRef.current?.();
       void sessionRef.current?.stop();
       sessionRef.current = null;
     },
-    [sessionDeps],
+    [sessionDeps, bus, updateProfile],
   );
 
   return (
@@ -303,6 +334,8 @@ export function App() {
           </div>
 
           <StageBreakdown metrics={metrics} />
+
+          <ClientForm value={profile} lang="en" onChange={updateProfile} />
         </div>
       </section>
 
