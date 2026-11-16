@@ -44,11 +44,18 @@
   --rack-ink: #e6edf3;
   --rack-dim: #8b95a5;
   --rack-sunken: #0f141b;
+  /* Every button sits on the rack, which is dark in both themes, so anything drawn
+     as text or line on it takes the dark-theme hue: the light theme's --running and
+     --fail drop to 2–3:1 there. */
+  --rack-accent: #58a6ff;
+  --rack-fail: #f85149;
+  --rack-line: #5a677c;
 
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
   --radius: 10px;
+  --radius-control: 8px;
   --gap: 20px;
 }
 
@@ -218,34 +225,6 @@ body {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
-}
-
-.talk {
-  appearance: none;
-  border: 1px solid var(--running);
-  background: var(--running);
-  color: var(--on-accent);
-  font: 600 14px/1 var(--sans);
-  padding: 12px 22px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: filter 120ms ease, transform 120ms ease;
-}
-
-.talk:hover:not(:disabled) { filter: brightness(1.08); }
-
-/* An active session is a state, not just a label: the button turns into a stop
-   control so it is obvious the microphone is open. */
-.talk[data-talking="true"] {
-  background: transparent;
-  color: var(--fail);
-  border-color: var(--fail);
-}
-.talk:active:not(:disabled) { transform: translateY(1px); }
-
-.talk:disabled {
-  cursor: default;
-  filter: saturate(0.4) opacity(0.75);
 }
 
 .hint {
@@ -491,57 +470,10 @@ body {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 22%, transparent);
 }
 
-.settings-row button {
-  appearance: none;
-  font: 600 13px/1 var(--sans);
-  color: var(--on-accent);
-  background: var(--running);
-  border: 1px solid var(--running);
-  border-radius: 7px;
-  padding: 10px 18px;
-  cursor: pointer;
-  transition: filter 120ms ease;
-}
-
-.settings-row button:hover:not(:disabled) { filter: brightness(1.08); }
-
-.settings-row button:disabled {
-  cursor: default;
-  color: var(--rack-dim);
-  background: var(--rack);
-  border-color: var(--rack-edge);
-}
-
-/* Says what it does, rather than leaving "turn off" to be guessed at. */
-.settings-secondary {
-  appearance: none;
-  align-self: flex-start;
-  font: 13px/1 var(--sans);
-  color: var(--rack-ink);
-  background: var(--rack);
-  border: 1px solid var(--rack-edge);
-  border-radius: 7px;
-  padding: 10px 16px;
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
-}
-
-.settings-secondary:hover { border-color: var(--fail); color: var(--fail); }
-
 .settings-hint {
   margin: 0;
   font-size: 12px;
   color: var(--rack-dim);
-}
-
-.linkish {
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--running);
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -679,11 +611,32 @@ body {
 }
 
 .transcript-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--rack-dim);
+}
+
+.transcript-legend {
+  display: inline-flex;
+  gap: 10px;
+  margin: 0 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Fact vs assumption in agent lines; the rack is dark in both themes, so fixed hues. */
+.mark-fact {
+  background: rgba(63, 185, 80, 0.18);
+  box-shadow: inset 0 -1px 0 #3fb950;
+}
+.mark-assumption {
+  background: rgba(255, 180, 84, 0.18);
+  box-shadow: inset 0 -1px 0 #ffb454;
 }
 
 /* Fixed height, scrolling inside: the conversation grows without moving anything
@@ -745,32 +698,8 @@ body {
    hues: the user's words come in through stt, the reply goes out through tts. */
 .line[data-who="you"] .line-who { color: var(--stage-stt); }
 .line[data-who="agent"] .line-who { color: var(--stage-tts); }
+.line[data-who="tool"] .line-text { font-family: var(--mono); font-size: 11px; color: var(--rack-dim); }
 .line[data-failed="true"] .line-text { color: var(--fail); }
-
-/* ── settings ──────────────────────────────────────────────────────────── */
-
-/* A word, not a gear. The hand-authored cog outline collapsed into a smudge at
-   14px — the teeth are finer than the pixels available — and a label says what it
-   opens without depending on the icon being read at all. */
-.settings-toggle {
-  appearance: none;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  padding: 4px 9px;
-  border: 1px solid var(--rack-edge);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--rack-dim);
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-
-.settings-toggle:hover,
-.settings-toggle[aria-expanded="true"] {
-  color: var(--rack-ink);
-  border-color: var(--rack-dim);
-}
 
 /* The backup engine changes what the agent can do (English only), so the notice is
    sized to be seen from across the room, not read as a footnote. */
@@ -782,4 +711,230 @@ body {
   background: var(--field);
   border: 2px solid var(--fail);
   border-radius: var(--radius);
+}
+
+/* ── buttons ───────────────────────────────────────────────────────────── */
+
+/* One base for every <button>, so a new one is dressed before anyone names it. A
+   variant only repaints the --btn-* slots; hover, active, focus and disabled are
+   written once against them. :where() keeps all of it at zero specificity, so a
+   single class is always enough to override. */
+:where(button) {
+  --btn-fg: var(--rack-ink);
+  --btn-bg: color-mix(in srgb, var(--rack-ink) 6%, var(--rack));
+  --btn-edge: var(--rack-line);
+  --btn-fg-hover: var(--btn-fg);
+  --btn-bg-hover: color-mix(in srgb, var(--rack-ink) 12%, var(--rack));
+  --btn-edge-hover: var(--rack-dim);
+  --btn-h: 40px;
+  --btn-pad: 16px;
+
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--btn-h);
+  margin: 0;
+  padding: 0 var(--btn-pad);
+  font: 600 13px/1 var(--sans);
+  white-space: nowrap;
+  color: var(--btn-fg);
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-edge);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+:where(button:hover:not(:disabled)) {
+  color: var(--btn-fg-hover);
+  background: var(--btn-bg-hover);
+  border-color: var(--btn-edge-hover);
+}
+
+:where(button:active:not(:disabled)) {
+  transform: translateY(1px);
+}
+
+:where(button):focus-visible {
+  outline-color: var(--rack-accent);
+}
+
+/* The same flat look whatever the variant: a disabled primary that kept its fill
+   still read as the thing to press. */
+:where(button:disabled) {
+  color: var(--rack-dim);
+  background: var(--rack);
+  border-color: var(--rack-edge);
+  cursor: not-allowed;
+}
+
+/* Primary — the one action a panel exists for. */
+.talk,
+.btn-primary,
+.settings-row button,
+.admin-copy,
+.admin-chip[data-on="true"] {
+  --btn-fg: var(--on-accent);
+  --btn-bg: var(--running);
+  --btn-edge: var(--running);
+  --btn-bg-hover: color-mix(in srgb, var(--running) 86%, var(--rack-ink));
+  --btn-edge-hover: var(--btn-bg-hover);
+}
+
+/* Destructive, outlined. An active session is a state, not just a label: the talk
+   button turns into a stop control so it is obvious the microphone is open. */
+.talk[data-talking="true"],
+.btn-danger,
+.bench-cut {
+  --btn-fg: var(--rack-fail);
+  --btn-bg: transparent;
+  --btn-edge: var(--rack-fail);
+  --btn-bg-hover: color-mix(in srgb, var(--rack-fail) 14%, transparent);
+  --btn-edge-hover: var(--rack-fail);
+}
+
+/* Destructive, quiet: sits beside a neutral button without outshouting it, and only
+   takes the red edge once it is about to be pressed. */
+.form-clear {
+  --btn-fg: var(--rack-fail);
+  --btn-bg: transparent;
+  --btn-bg-hover: color-mix(in srgb, var(--rack-fail) 14%, transparent);
+  --btn-edge-hover: var(--rack-fail);
+}
+
+/* Neutral until hovered — says what it does, rather than leaving "turn off" to be
+   guessed at, but does not sit red in a drawer that is opened for other reasons. */
+.settings-secondary {
+  --btn-fg-hover: var(--rack-fail);
+  --btn-edge-hover: var(--rack-fail);
+  align-self: flex-start;
+}
+
+/* Text button: actions inside a row or a panel head, where a box per action would
+   turn the row into a toolbar. */
+.admin-link {
+  --btn-fg: var(--rack-accent);
+  --btn-bg: transparent;
+  --btn-edge: transparent;
+  --btn-bg-hover: color-mix(in srgb, var(--rack-accent) 14%, transparent);
+  --btn-edge-hover: transparent;
+  --btn-h: 28px;
+  --btn-pad: 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.admin-link:disabled {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Revoke is always the row's last action, and the only one that cannot be undone. */
+.admin-list li > .admin-link:last-child {
+  --btn-fg: var(--rack-fail);
+  --btn-bg-hover: color-mix(in srgb, var(--rack-fail) 14%, transparent);
+}
+
+.talk {
+  --btn-h: 44px;
+  --btn-pad: 22px;
+  font-size: 14px;
+}
+
+.admin-copy {
+  --btn-h: 32px;
+  --btn-pad: 14px;
+  font-size: 12px;
+}
+
+.admin-chip {
+  --btn-pad: 14px;
+  font-family: var(--mono);
+}
+
+.admin-chip:not([data-on="true"]) {
+  --btn-fg: var(--rack-dim);
+  --btn-fg-hover: var(--rack-ink);
+}
+
+/* Head controls take the head's own mono caps. A word, not a gear: a cog outline
+   collapses into a smudge at 14px, and a label does not depend on being decoded. */
+.settings-toggle,
+.transcript-download {
+  --btn-fg: var(--rack-dim);
+  --btn-bg: transparent;
+  --btn-fg-hover: var(--rack-ink);
+  --btn-bg-hover: transparent;
+  --btn-h: 28px;
+  --btn-pad: 10px;
+  font: inherit;
+  line-height: 1;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  border-radius: 6px;
+}
+
+.settings-toggle[aria-expanded="true"] {
+  --btn-fg: var(--rack-ink);
+  --btn-edge: var(--rack-dim);
+}
+
+.transcript-download {
+  margin-left: auto;
+}
+
+/* An action, not navigation — so a button, but one that reads as part of the
+   sentence it sits in. */
+.linkish,
+.admin-linkish {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  font: inherit;
+  white-space: normal;
+  color: var(--rack-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+}
+
+:is(.linkish, .admin-linkish):hover:not(:disabled) {
+  color: var(--rack-ink);
+  background: none;
+}
+
+:is(.linkish, .admin-linkish):disabled {
+  color: var(--rack-dim);
+  background: none;
+}
+
+/* Fingers get 44px. The compact ones keep their drawn size and grow an invisible
+   hit area instead, so a panel head does not double in height on a phone. */
+@media (pointer: coarse) {
+  :where(button) {
+    --btn-h: 44px;
+  }
+
+  .settings-toggle,
+  .transcript-download,
+  .admin-link,
+  .admin-copy {
+    position: relative;
+  }
+
+  :is(.settings-toggle, .transcript-download, .admin-link, .admin-copy)::after {
+    content: "";
+    position: absolute;
+    inset: -8px -4px;
+  }
 }

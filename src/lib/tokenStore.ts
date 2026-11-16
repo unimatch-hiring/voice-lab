@@ -18,6 +18,7 @@
  * The real containment is elsewhere: the Worker hands out single-use ElevenLabs
  * tokens that expire in seconds, and it only answers a fixed origin list.
  */
+import { parseProfile, type ClientProfile } from "./formModel";
 
 const DB_NAME = "voice-lab";
 const DB_VERSION = 1;
@@ -25,6 +26,7 @@ const STORE = "auth";
 const KEY_ID = "token-key";
 const BLOB_ID = "token-blob";
 const ADMIN_BLOB_ID = "admin-blob";
+const PROFILE_ID = "profile-blob";
 
 interface StoredBlob {
   iv: number[];
@@ -68,7 +70,17 @@ async function getKey(db: IDBDatabase): Promise<CryptoKey> {
   return key;
 }
 
-async function saveSecret(id: string, secret: string): Promise<void> {
+// One write at a time: two saves racing on a first visit would each mint a key, and the
+// loser's record would then decrypt as empty. It also keeps the last keystroke the last put.
+let writes: Promise<void> = Promise.resolve();
+
+function saveSecret(id: string, secret: string): Promise<void> {
+  const next = writes.then(() => writeSecret(id, secret));
+  writes = next.catch(() => undefined);
+  return next;
+}
+
+async function writeSecret(id: string, secret: string): Promise<void> {
   const db = await open();
   try {
     if (!secret) {
@@ -142,4 +154,17 @@ export async function loadAdminToken(): Promise<string> {
 
 export async function clearAdminToken(): Promise<void> {
   await saveSecret(ADMIN_BLOB_ID, "");
+}
+
+/** The customer's form, encrypted like the token so a copied database does not leak it. */
+export async function saveProfile(profile: ClientProfile): Promise<void> {
+  await saveSecret(PROFILE_ID, JSON.stringify(profile));
+}
+
+export async function loadProfile(): Promise<ClientProfile> {
+  return parseProfile(await loadSecret(PROFILE_ID));
+}
+
+export async function clearProfile(): Promise<void> {
+  await saveSecret(PROFILE_ID, "");
 }

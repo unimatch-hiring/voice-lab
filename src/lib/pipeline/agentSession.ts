@@ -1,9 +1,9 @@
 import { Conversation } from "@elevenlabs/client";
 import { Desmoother } from "../mouthLevel";
-import { SYSTEM_PROMPT } from "../persona";
+import { FIRST_MESSAGE, SYSTEM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
-import type { SessionDeps, VoiceSession } from "./session";
+import { withBriefing, type SessionDeps, type VoiceSession } from "./session";
 
 export type AgentSessionDeps = SessionDeps;
 
@@ -94,7 +94,15 @@ export class AgentSession implements VoiceSession {
       conversationToken: token,
 
       // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      // The greeting overrides the dashboard's too; the agent must allow both overrides.
+      overrides: {
+        agent: {
+          prompt: { prompt: withBriefing(SYSTEM_PROMPT, this.deps.briefing?.()) },
+          firstMessage: this.deps.greeting?.() ?? FIRST_MESSAGE,
+        },
+      },
+      // Only the handlers travel from here: each tool must also be declared on the agent.
+      clientTools: Object.fromEntries((this.deps.functions ?? []).map((f) => [f.name, f.run])),
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
@@ -216,7 +224,10 @@ export class AgentSession implements VoiceSession {
       this.intervals.push([this.stageAt, now]);
 
       if (next === "capture") {
-        this.deps.onTurn({ ...this.metrics, totalMs: coveredMs(this.intervals) });
+        const metrics = { ...this.metrics, totalMs: coveredMs(this.intervals) };
+        this.deps.onTurn(metrics);
+        // The supervisor hangs its "form still missing" nudge on this.
+        this.deps.bus.emit({ type: "turn-end", at: now, metrics });
         this.resetTurn();
       }
     }
@@ -247,6 +258,14 @@ export class AgentSession implements VoiceSession {
     this.intervals = [];
     this.lanes.clear();
     this.vadOpen = false;
+  }
+
+  sendContextualUpdate(text: string): void {
+    this.conversation?.sendContextualUpdate(text);
+  }
+
+  sendUserMessage(text: string): void {
+    this.conversation?.sendUserMessage(text);
   }
 
   async stop(): Promise<void> {

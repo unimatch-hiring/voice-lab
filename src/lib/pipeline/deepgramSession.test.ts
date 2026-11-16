@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { DEEPGRAM_AGENT_URL, DeepgramSession, type ClientFunction } from "./deepgramSession";
 import type { DeepgramAudio } from "./deepgramAudio";
-import { SYSTEM_PROMPT } from "../persona";
+import { DEEPGRAM_PROMPT } from "../persona";
 import { EventBus } from "../events";
 import type { PipelineEvent, TurnMetrics } from "../types";
 
@@ -102,9 +102,10 @@ afterEach(() => {
 
 interface HarnessOptions {
   functions?: ClientFunction[];
+  briefing?: () => string;
 }
 
-async function harness({ functions }: HarnessOptions = {}) {
+async function harness({ functions, briefing }: HarnessOptions = {}) {
   const bus = new EventBus();
   const events: PipelineEvent[] = [];
   bus.on((e) => events.push(e));
@@ -118,6 +119,7 @@ async function harness({ functions }: HarnessOptions = {}) {
     onTurn: (m) => turns.push(m),
     onEnded: (reason, message) => ended.push({ reason, message }),
     functions,
+    briefing,
     audio: () => audio as unknown as DeepgramAudio,
   });
 
@@ -173,7 +175,7 @@ test("Settings carry the role, the client functions and English-only managed mod
   const settings = socket.json().find((m) => m.type === "Settings");
   expect(settings.audio.input).toEqual({ encoding: "linear16", sample_rate: 48000 });
   expect(settings.audio.output.sample_rate).toBe(24000);
-  expect(settings.agent.think.prompt).toBe(SYSTEM_PROMPT);
+  expect(settings.agent.think.prompt).toBe(DEEPGRAM_PROMPT);
   expect(settings.agent.think.provider.type, "managed LLM, no key of ours").toBe("open_ai");
   expect(settings.agent.think.endpoint, "no endpoint means Deepgram-managed").toBeUndefined();
   expect(settings.agent.think.functions).toEqual([
@@ -182,6 +184,13 @@ test("Settings carry the role, the client functions and English-only managed mod
   expect(settings.agent.think.functions[0].endpoint, "no endpoint means client-side").toBeUndefined();
   expect(settings.agent.speak.provider.model).toMatch(/-en$/);
   expect(settings.agent.listen.provider.language).toBe("en");
+});
+
+test("what is on file about the customer is part of the prompt in Settings", async () => {
+  const { socket } = await harness({ briefing: () => "Returning customer: Anna" });
+
+  const settings = socket.json().find((m) => m.type === "Settings");
+  expect(settings.agent.think.prompt).toBe(`${DEEPGRAM_PROMPT}\n\nReturning customer: Anna`);
 });
 
 test("microphone audio waits for SettingsApplied", async () => {
@@ -295,6 +304,7 @@ test("the user talking over the agent drops queued audio and ends the reply", as
   expect(audio.flushed, "queued agent audio would talk over the user").toBe(1);
   expect(lanes(events, "stage-end")).toContain("tts");
   expect(turns, "the interrupted turn is still reported").toHaveLength(1);
+  expect(events.filter((e) => e.type === "turn-end"), "on the bus too, for the supervisor's nudge").toHaveLength(1);
 });
 
 test("a reply ends when playback drains, not when the server finishes sending", async () => {
@@ -348,9 +358,26 @@ test("the mouth reads the playing audio, and nothing once it stops", async () =>
 test("typed text goes in as the user's turn", async () => {
   const { socket, session } = await harness();
 
-  session.sendText("What can you do?");
+  session.sendUserMessage("What can you do?");
 
   expect(socket.json()).toContainEqual({ type: "InjectUserMessage", content: "What can you do?" });
+});
+
+test("context goes in silently as a prompt update, not as a user turn", async () => {
+  const { socket, session } = await harness();
+
+  session.sendContextualUpdate("Customer name: Anna.");
+
+  expect(socket.json()).toContainEqual({ type: "UpdatePrompt", prompt: "Customer name: Anna." });
+  expect(socket.json()).not.toContainEqual(expect.objectContaining({ type: "InjectUserMessage" }));
+});
+
+test("the prompt only grows, so the same update is appended once per call", async () => {
+  const { socket, session } = await harness();
+
+  for (const t of ["Form still missing: phone.", "Form still missing: car.", "Form still missing: phone."]) session.sendContextualUpdate(t);
+
+  expect(socket.json().filter((m: { type: string }) => m.type === "UpdatePrompt")).toHaveLength(2);
 });
 
 test("an injected agent line reports whether it was spoken or refused", async () => {

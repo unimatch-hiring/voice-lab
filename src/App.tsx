@@ -6,8 +6,15 @@ import { BACKUP_ENGINE_NOTICE } from "./lib/engine";
 import { createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
-import { loadToken, saveToken } from "./lib/tokenStore";
+import { clearProfile, loadProfile, loadToken, saveProfile, saveToken } from "./lib/tokenStore";
+import { briefing, EMPTY_PROFILE, type ClientProfile } from "./lib/formModel";
+import { greeting, today } from "./lib/persona";
+import { makeTools } from "./lib/tools";
+import { makeConfirmed } from "./lib/confirmed";
+import { supervise } from "./lib/supervisor";
+import { ClientForm } from "./ClientForm";
 import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
+import { saveFile } from "./lib/saveFile";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
@@ -47,6 +54,25 @@ export function App() {
   // The first render is offline and flips to live mode once the token is read.
   const [storedToken, setStoredToken] = useState("");
   const [tokenReady, setTokenReady] = useState(false);
+  const [profile, setProfile] = useState<ClientProfile>(EMPTY_PROFILE);
+  const bus = useMemo(() => new EventBus(), []);
+  // Tools read the form between renders: two update_form calls in one turn must see each other.
+  const profileRef = useRef(EMPTY_PROFILE);
+  // The store answers asynchronously; whatever was typed or filled before it does is newer.
+  const editedRef = useRef(false);
+  const updateProfile = useCallback((next: ClientProfile) => {
+    editedRef.current = true;
+    profileRef.current = next;
+    setProfile(next);
+    void saveProfile(next);
+  }, []);
+  const forgetProfile = useCallback(() => {
+    editedRef.current = true;
+    profileRef.current = EMPTY_PROFILE;
+    setProfile(EMPTY_PROFILE);
+    void clearProfile();
+    bus.emit({ type: "profile-cleared" });
+  }, [bus]);
   const config = useMemo(() => loadConfig(storedToken), [storedToken]);
 
   useEffect(() => {
@@ -56,11 +82,15 @@ export function App() {
       setStoredToken(t);
       setTokenReady(true);
     });
+    loadProfile().then((p) => {
+      if (!alive || editedRef.current) return;
+      profileRef.current = p;
+      setProfile(p);
+    });
     return () => {
       alive = false;
     };
   }, []);
-  const bus = useMemo(() => new EventBus(), []);
   const [error, setError] = useState<string | null>(null);
   // The waterfall scrolls a 6s window, so a finished turn vanishes from it within
   // seconds. Keeping the metrics means the result of the run stays on screen —
@@ -113,6 +143,8 @@ export function App() {
   }, [config, transport]);
 
   const sessionRef = useRef<VoiceSession | null>(null);
+  const confirmed = useMemo(makeConfirmed, []);
+  const unsuperviseRef = useRef<(() => void) | null>(null);
   /** The engine the last start attempt used, so its failure is worded for that engine. */
   const engineRef = useRef<Engine>("elevenlabs");
 
@@ -125,6 +157,8 @@ export function App() {
         recorder.addTurn(turn);
       },
       onEnded: (reason, message) => {
+        // A turn-end after the close would otherwise nudge a session that is already gone.
+        unsuperviseRef.current?.();
         setTalking(false);
         // The agent can hang up on its own, in which case the transport button is never
         // pressed — without this the recording of that conversation is simply lost.
@@ -137,8 +171,11 @@ export function App() {
         );
         setEndedBy(reason);
       },
+      functions: makeTools({ profile: () => profileRef.current, setProfile: updateProfile, confirmed, report: (e) => bus.emit(e) }),
+      briefing: () => [today(new Date()), briefing(profileRef.current)].filter(Boolean).join("\n\n"),
+      greeting: () => greeting(profileRef.current.name),
     };
-  }, [bus, transport, recorder]);
+  }, [bus, transport, recorder, updateProfile, confirmed]);
 
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
@@ -151,14 +188,7 @@ export function App() {
     if (!conversation) return;
 
     const name = fixtureFilename(conversation);
-    const url = URL.createObjectURL(
-      new Blob([toFixtureJson(conversation)], { type: "application/json" }),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveFile(name, toFixtureJson(conversation), "application/json");
     setSavedAs(name);
   };
   saveRecordingRef.current = recording ? saveRecording : null;
@@ -168,6 +198,7 @@ export function App() {
     setError(null);
     const running = sessionRef.current;
     if (running?.isRunning) {
+      unsuperviseRef.current?.();
       await running.stop();
       setTalking(false);
       setEndedBy("user");
@@ -196,6 +227,23 @@ export function App() {
         await session.stop();
         return;
       }
+      unsuperviseRef.current?.();
+      unsuperviseRef.current = supervise({
+        bus,
+        profile: () => profileRef.current,
+        setProfile: updateProfile,
+        send: (text) => session.sendContextualUpdate(text),
+        hangUp: () => {
+          if (sessionRef.current !== session) return;
+          unsuperviseRef.current?.();
+          void session.stop().then(() => {
+            setTalking(false);
+            setEndedBy("agent");
+            saveRecordingRef.current?.();
+          });
+        },
+        confirmed,
+      });
       setTalking(true);
     } catch (e) {
       setError(startFailureMessage(e, engineRef.current));
@@ -209,10 +257,11 @@ export function App() {
   useEffect(
     () => () => {
       generationRef.current += 1;
+      unsuperviseRef.current?.();
       void sessionRef.current?.stop();
       sessionRef.current = null;
     },
-    [sessionDeps],
+    [sessionDeps, bus, updateProfile, confirmed],
   );
 
   return (
@@ -303,6 +352,8 @@ export function App() {
           </div>
 
           <StageBreakdown metrics={metrics} />
+
+          <ClientForm value={profile} lang="en" onChange={updateProfile} onClear={forgetProfile} />
         </div>
       </section>
 

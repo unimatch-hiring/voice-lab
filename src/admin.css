@@ -43,22 +43,6 @@
   gap: 8px;
 }
 
-.admin-chip {
-  padding: 7px 14px;
-  font: 600 13px/1 var(--mono);
-  color: var(--ink-dim);
-  cursor: pointer;
-  background: var(--field);
-  border: 1px solid var(--field-edge);
-  border-radius: var(--radius);
-}
-
-.admin-chip[data-on="true"] {
-  color: var(--on-accent);
-  background: var(--running);
-  border-color: var(--running);
-}
-
 /* The freshly minted key: the one thing on the page that gets copied, so it is
    given the width and the weight to be read out loud without squinting. */
 .admin-fresh {
@@ -77,16 +61,6 @@
   overflow-wrap: anywhere;
   font: 13px/1.4 var(--mono);
   color: var(--ink);
-}
-
-.admin-copy {
-  padding: 7px 14px;
-  font: 600 12px/1 var(--sans);
-  color: var(--on-accent);
-  cursor: pointer;
-  background: var(--running);
-  border: none;
-  border-radius: var(--radius);
 }
 
 .admin-list {
@@ -131,15 +105,6 @@
   white-space: nowrap;
 }
 
-.admin-link {
-  padding: 0;
-  font: 600 12px/1 var(--sans);
-  color: var(--running);
-  cursor: pointer;
-  background: none;
-  border: none;
-}
-
 .admin-error {
   margin: 0;
   font: 13px/1.4 var(--sans);
@@ -161,18 +126,6 @@
   margin: 0;
   font-size: 13px;
   color: var(--rack-dim);
-}
-
-/* Changing the address is an action, not navigation — a button, styled like a link. */
-.admin-linkish {
-  appearance: none;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--running);
-  text-decoration: underline;
-  cursor: pointer;
 }
 
 .admin-engine {

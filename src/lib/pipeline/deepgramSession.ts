@@ -1,9 +1,9 @@
 import { Desmoother } from "../mouthLevel";
-import { SYSTEM_PROMPT } from "../persona";
+import { DEEPGRAM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
 import { createBrowserAudio, OUTPUT_RATE, type DeepgramAudio } from "./deepgramAudio";
-import type { SessionDeps, VoiceSession } from "./session";
+import { withBriefing, type SessionDeps, type VoiceSession } from "./session";
 
 /**
  * The same session contract on Deepgram's Voice Agent API: one WebSocket carries
@@ -12,20 +12,11 @@ import type { SessionDeps, VoiceSession } from "./session";
  */
 export const DEEPGRAM_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse";
 
-/** A function the agent may call; it runs here in the page, not on Deepgram's side. */
-export interface ClientFunction {
-  name: string;
-  description: string;
-  /** JSON Schema of the arguments. */
-  parameters: Record<string, unknown>;
-  /** The result goes back to the model as text. */
-  run(args: Record<string, unknown>): string | Promise<string>;
-}
+export type { ClientFunction } from "./session";
 
 export type InjectBehavior = "default" | "queue" | "interrupt";
 
 export interface DeepgramSessionDeps extends SessionDeps {
-  functions?: ClientFunction[];
   /** Audio hardware; replaced in tests. */
   audio?: () => DeepgramAudio;
 }
@@ -74,6 +65,7 @@ export class DeepgramSession implements VoiceSession {
   private lastError: string | undefined;
   private injection: { text: string; settle: (spoken: boolean) => void } | null = null;
   private sharpen = new Desmoother();
+  private prompted = new Set<string>();
 
   constructor(private deps: DeepgramSessionDeps) {}
 
@@ -92,6 +84,7 @@ export class DeepgramSession implements VoiceSession {
     this.stopping = false;
     this.resetTurn();
 
+    this.prompted.clear();
     // Microphone first: a denied permission should fail before a token is spent.
     const audio = (this.deps.audio ?? createBrowserAudio)();
     this.audio = audio;
@@ -111,8 +104,17 @@ export class DeepgramSession implements VoiceSession {
     this.running = true;
   }
 
+  // No contextual update in Deepgram; UpdatePrompt adds to the prompt rather than replacing it.
+  // https://developers.deepgram.com/docs/voice-agent-update-prompt
+  // Nothing sent can be taken back, so the same hint is appended once per call.
+  sendContextualUpdate(text: string): void {
+    if (this.prompted.has(text)) return;
+    this.prompted.add(text);
+    this.send({ type: "UpdatePrompt", prompt: text });
+  }
+
   /** InjectUserMessage. */
-  sendText(text: string): void {
+  sendUserMessage(text: string): void {
     this.send({ type: "InjectUserMessage", content: text });
   }
 
@@ -184,7 +186,7 @@ export class DeepgramSession implements VoiceSession {
         listen: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.listen, language: "en" } },
         think: {
           provider: { type: "open_ai", model: DEEPGRAM_MODELS.think },
-          prompt: SYSTEM_PROMPT,
+          prompt: withBriefing(DEEPGRAM_PROMPT, this.deps.briefing?.()),
           ...(functions?.length ? { functions } : {}),
         },
         speak: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.speak } },
@@ -353,7 +355,10 @@ export class DeepgramSession implements VoiceSession {
         (this.metrics.stages[this.stage] ?? 0) + (now - this.stageAt);
       this.intervals.push([this.stageAt, now]);
       if (next === "capture") {
-        this.deps.onTurn({ ...this.metrics, totalMs: coveredMs(this.intervals) });
+        const metrics = { ...this.metrics, totalMs: coveredMs(this.intervals) };
+        this.deps.onTurn(metrics);
+        // The supervisor hangs its "form still missing" nudge on this.
+        this.deps.bus.emit({ type: "turn-end", at: now, metrics });
         this.resetTurn();
       }
     }
