@@ -14,6 +14,16 @@ npm ci
 npm run dev     # http://localhost:5173
 ```
 
+In a second terminal, run `npm --prefix server start` to save and read conversations.
+Click **History** on the main page to open the shared transcript list. All Start/Stop
+cycles in one page load share a dialogue. Reloading starts a new one when you next talk.
+You can read history without an interview key. See the
+[history component and sequence diagrams](docs/history.md).
+
+Run `make test` for the frontend, Worker and history server suites. The
+[behavioral test cases](spec/test_cases.md) map scenarios to automated tests. See the
+[history server guide](server/README.md) for the data directory and deployment configuration.
+
 The conversation runs on [ElevenLabs
 Agents](https://elevenlabs.io/docs/agents-platform/overview), so it needs a deployed Worker
 (`worker/`) to mint session tokens and a client token to reach it.
@@ -59,6 +69,7 @@ page: [docs/deploy.md](docs/deploy.md#where-previews-live).
 - `src/lib/persona.ts` — the agent's role, sent as an override when the session opens
 - `src/scene/` — the scene; reads the event stream only and knows nothing about the pipeline
 - `worker/` — Cloudflare Worker minting short-lived tokens (no audio flows through it)
+- `server/` — standalone Node API and JSON storage for shared dialogue history
 - `tools/` — sprite builder for the character
 
 More detail, by area: [docs/](docs/). Working on the code: [CLAUDE.md](./CLAUDE.md).
