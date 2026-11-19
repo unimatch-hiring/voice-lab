@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EventBus } from "./lib/events";
 import { createSession } from "./lib/pipeline/createSession";
-import type { Engine, SessionDeps, VoiceSession } from "./lib/pipeline/session";
+import type { Engine, SessionDeps } from "./lib/pipeline/session";
 import { BACKUP_ENGINE_NOTICE } from "./lib/engine";
 import { createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
 import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
+import type { EndReason } from "./lib/historyApi";
+import type { createHistoryCapture } from "./lib/historyCapture";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
@@ -42,7 +44,48 @@ export function startFailureMessage(e: unknown, engine: Engine = "elevenlabs"): 
   return raw;
 }
 
-export function App() {
+function createActiveVoiceSession(
+  engine: Engine,
+  deps: SessionDeps,
+  capture: ReturnType<typeof createHistoryCapture> | null,
+) {
+  let history = capture?.openSession();
+  const bus = new EventBus();
+  // Late provider events belong to the voice session that emitted them.
+  bus.on((event) => history?.record(event));
+  bus.on((event) => {
+    if (event.type === "agent-reply" && event.alreadyStreamed) return;
+    deps.bus.emit(event);
+  });
+
+  function finishHistory(reason: EndReason) {
+    history?.finish(reason);
+  }
+
+  const voice = createSession(engine, {
+    ...deps,
+    bus,
+    onEnded: (reason, message) => {
+      finishHistory(reason);
+      deps.onEnded(reason, message);
+    },
+  });
+
+  return {
+    voice,
+    connected: () => history?.connected(),
+    finishHistory,
+    detachHistory: () => { history = undefined; },
+  };
+}
+
+interface AppProps {
+  historyCapture?: ReturnType<typeof createHistoryCapture> | null;
+  historyWarning?: string | null;
+  onOpenHistory?: () => void;
+}
+
+export function App({ historyCapture = null, historyWarning, onOpenHistory }: AppProps = {}) {
   // The token comes from IndexedDB, i.e. asynchronously, so config lives in state.
   // The first render is offline and flips to live mode once the token is read.
   const [storedToken, setStoredToken] = useState("");
@@ -112,7 +155,7 @@ export function App() {
     };
   }, [config, transport]);
 
-  const sessionRef = useRef<VoiceSession | null>(null);
+  const sessionRef = useRef<ReturnType<typeof createActiveVoiceSession> | null>(null);
   /** The engine the last start attempt used, so its failure is worded for that engine. */
   const engineRef = useRef<Engine>("elevenlabs");
 
@@ -143,7 +186,7 @@ export function App() {
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
   // mid-reply and leave the character frozen with its mouth open.
-  const mouthSource = useCallback(() => sessionRef.current?.mouthSpectrum() ?? null, []);
+  const mouthSource = useCallback(() => sessionRef.current?.voice.mouthSpectrum() ?? null, []);
 
   /** Downloads the finished conversation as a fixture file. */
   const saveRecording = () => {
@@ -167,8 +210,9 @@ export function App() {
     if (startingRef.current) return;
     setError(null);
     const running = sessionRef.current;
-    if (running?.isRunning) {
-      await running.stop();
+    if (running?.voice.isRunning) {
+      await running.voice.stop();
+      running.finishHistory("user");
       setTalking(false);
       setEndedBy("user");
       if (recording) saveRecording();
@@ -176,6 +220,7 @@ export function App() {
     }
     startingRef.current = true;
     setStarting(true);
+    let attempt: ReturnType<typeof createActiveVoiceSession> | undefined;
     try {
       setEndedBy(null);
       if (recording) {
@@ -188,16 +233,18 @@ export function App() {
       setEngine(current);
       engineRef.current = current;
       const generation = generationRef.current;
-      const session = createSession(current, sessionDeps);
-      sessionRef.current = session;
-      await session.start();
+      attempt = createActiveVoiceSession(current, sessionDeps, historyCapture);
+      sessionRef.current = attempt;
+      await attempt.voice.start();
       // Torn down mid-start: stop() then found nothing open yet, so the session is ours to close.
       if (generation !== generationRef.current) {
-        await session.stop();
+        await attempt.voice.stop();
         return;
       }
+      attempt.connected();
       setTalking(true);
     } catch (e) {
+      attempt?.finishHistory("error");
       setError(startFailureMessage(e, engineRef.current));
       setTalking(false);
     } finally {
@@ -209,7 +256,8 @@ export function App() {
   useEffect(
     () => () => {
       generationRef.current += 1;
-      void sessionRef.current?.stop();
+      sessionRef.current?.detachHistory();
+      void sessionRef.current?.voice.stop();
       sessionRef.current = null;
     },
     [sessionDeps],
@@ -233,6 +281,11 @@ export function App() {
           </span>
           <span className="spacer" />
           <span>window 6s</span>
+          {onOpenHistory && (
+            <button type="button" className="settings-toggle" onClick={onOpenHistory}>
+              History
+            </button>
+          )}
           {/* With no token the gate is open anyway, so the toggle would move nothing. */}
           {!config.offline && (
             <button
@@ -251,6 +304,7 @@ export function App() {
           <TokenGate
             token={storedToken}
             onChange={(next) => {
+              if (!next) sessionRef.current?.finishHistory("user");
               setStoredToken(next);
               setSettingsOpen(false);
             }}
@@ -293,6 +347,9 @@ export function App() {
           )}
 
           <p className="status-line">{error}</p>
+          {historyWarning && (
+            <p className="status-line" role="status">{historyWarning}</p>
+          )}
 
           <div className="run">
             <div className="run-left">

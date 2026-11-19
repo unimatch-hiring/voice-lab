@@ -139,12 +139,9 @@ export class AgentSession implements VoiceSession {
         // `onAgentChatResponsePart` streams the reply earlier but is experimental and does
         // not always fire, so this is the source of record.
         this.metrics.ttsChars += message.length;
-        if (this.streamedReply.trim() === message.trim()) {
-          this.streamedReply = "";
-          return;
-        }
+        const alreadyStreamed = this.streamedReply.trim() === message.trim();
         this.streamedReply = "";
-        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
+        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now(), alreadyStreamed });
       },
 
       onAgentChatResponsePart: (part) => {

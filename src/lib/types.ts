@@ -37,7 +37,7 @@ export type PipelineEvent =
   // i.e. by the transport rather than by the model.
   | { type: "llm-token"; token: string; at: number }
   /** A complete agent reply, for providers that report it as one message. */
-  | { type: "agent-reply"; text: string; at: number }
+  | { type: "agent-reply"; text: string; at: number; alreadyStreamed?: boolean }
   // Input audio level, ~100 Hz. Emitted by capture with a live mic; offline there
   // are no such events and the scene shows 0.
   | { type: "audio-level"; rms: number; at: number }
