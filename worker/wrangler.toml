@@ -65,13 +65,15 @@ namespace_id = "4282"
 limit = 20
 period = 60
 
-# Token endpoints spend ElevenLabs and Deepgram minutes. A conversation needs one token, so
-# six a minute per key is generous for a person and cheap for a leaked key.
+# Token endpoints spend ElevenLabs and Deepgram minutes. A conversation needs one token;
+# 20 a minute per key: six stopped a candidate mid-interview on 23.11 (a page that
+# reconnects, or a retry loop in their code, burns through six fast). Still cheap for a
+# leaked key, and the per-IP limit below caps one machine anyway.
 [[ratelimits]]
 name = "TOKEN_KEY_LIMIT"
 namespace_id = "4283"
 [ratelimits.simple]
-limit = 6
+limit = 20
 period = 60
 
 [[ratelimits]]

@@ -141,10 +141,10 @@ Cloudflare location and are approximate; the exact counting is `AddressGuard`'s.
 |---|---|---|
 | `SIGNIN_LIMIT` / `SIGNIN_IP_LIMIT` | address / caller IP | 5 / 10 |
 | `VERIFY_LIMIT` / `VERIFY_IP_LIMIT` | address / caller IP | 10 / 20 |
-| `TOKEN_KEY_LIMIT` | hash of the key; minting and `/engine` counted apart | 6 |
+| `TOKEN_KEY_LIMIT` | hash of the key; minting and `/engine` counted apart | 20 |
 | `TOKEN_IP_LIMIT` | caller IP, checked before the key is looked up | 30 |
 
-Over the limit is `429`. The token limits are approximate (Cloudflare Rate Limiting counts asynchronously, so a burst can get one or two past six); the exact counter guards sign-in only.
+Over the limit is `429`. The token limits are approximate (Cloudflare Rate Limiting counts asynchronously, so a burst can get one or two past the limit); the exact counter guards sign-in only.
 
 ## Local development
 

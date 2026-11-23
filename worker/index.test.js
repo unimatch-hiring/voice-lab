@@ -837,7 +837,15 @@ describe("limits per caller address", () => {
 });
 
 describe("limits on spending minutes", () => {
-  it("mints at most six tokens a minute for one key", async () => {
+  // 23.11: six a minute per key sent a candidate into 429 mid-interview.
+  it("is deployed with 20 tokens a minute per key and 30 per address", () => {
+    const toml = readFileSync(`${process.cwd()}/worker/wrangler.toml`, "utf8");
+    const limitOf = (name) =>
+      Number(toml.match(new RegExp(`name = "${name}"[\\s\\S]*?limit = (\\d+)`))[1]);
+    expect([limitOf("TOKEN_KEY_LIMIT"), limitOf("TOKEN_IP_LIMIT")]).toEqual([20, 30]);
+  });
+
+  it("stops minting for a key once its limiter runs out", async () => {
     const fetchSpy = stubElevenLabs();
     const limiter = fakeLimiter(6);
     const e = env({ TOKEN_KEY_LIMIT: limiter });
