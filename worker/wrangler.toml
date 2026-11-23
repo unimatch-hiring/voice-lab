@@ -2,12 +2,22 @@ name = "voice-lab-token-minter"
 main = "index.js"
 compatibility_date = "2026-08-05"
 
+# Workers Logs: every request and every console.log is kept and searchable in the
+# dashboard (Workers -> voice-lab-token-minter -> Logs), not only while someone runs
+# `wrangler tail`. Refusals log one JSON line each: reason, path, origin, method.
+# Traffic is a few interviews a day, so sampling everything costs nothing.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 # The ElevenLabs Agent this page talks to. Not a secret: a session token is still
 # required, and that is minted server-side.
 AGENT_ID = "agent_6701kzf2723mf3dtp7ben1j5dczt"
 # Who may call the Worker from a browser: the deployed frontend on GitHub Pages
-# plus local development. Origins include the scheme and no trailing slash.
+# plus local development. Only this list reaches /admin/. The candidate's endpoints
+# also answer PREVIEW_ORIGINS, http://localhost and http://127.0.0.1 on any port, and
+# calls without an Origin (a candidate's own backend) — the interview key guards those. Origins include the scheme and no trailing slash.
 # :5173 is the dev server, :4173 is `vite preview`, where the production build is
 # checked before deploying — without the second port that check is impossible.
 ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173"
@@ -55,13 +65,15 @@ namespace_id = "4282"
 limit = 20
 period = 60
 
-# Token endpoints spend ElevenLabs and Deepgram minutes. A conversation needs one token, so
-# six a minute per key is generous for a person and cheap for a leaked key.
+# Token endpoints spend ElevenLabs and Deepgram minutes. A conversation needs one token;
+# 20 a minute per key: six stopped a candidate mid-interview on 23.11 (a page that
+# reconnects, or a retry loop in their code, burns through six fast). Still cheap for a
+# leaked key, and the per-IP limit below caps one machine anyway.
 [[ratelimits]]
 name = "TOKEN_KEY_LIMIT"
 namespace_id = "4283"
 [ratelimits.simple]
-limit = 6
+limit = 20
 period = 60
 
 [[ratelimits]]

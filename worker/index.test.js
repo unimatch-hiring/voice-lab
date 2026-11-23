@@ -177,6 +177,126 @@ describe("minting a session token", () => {
   });
 });
 
+describe("who may call the candidate's endpoints", () => {
+  /** A request with no Origin header, the way a server or curl sends it. */
+  const serverReq = (path, headers = {}) =>
+    new Request(`https://worker.test${path}`, {
+      method: "POST",
+      headers: { "cf-connecting-ip": "203.0.113.7", ...headers },
+    });
+
+  it("serves a candidate's own backend, which sends no Origin, with a live key", async () => {
+    stubElevenLabs();
+    const r = await worker.fetch(serverReq("/agent/token", { "x-vibe-token": "vibe_el" }), env());
+    expect(r.status).toBe(200);
+  });
+
+  it("still wants a live key from a caller without Origin", async () => {
+    const r = await worker.fetch(serverReq("/agent/token", { "x-vibe-token": "vibe_gone" }), env());
+    expect(r.status).toBe(401);
+  });
+
+  // 23.11: :5173 was taken, Vite moved to :5174, and the candidate got 403 mid-interview.
+  it("serves Vite when it falls back to the next port", async () => {
+    stubElevenLabs();
+    const r = await worker.fetch(
+      req("/agent/token", { origin: "http://localhost:5174", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it("serves a candidate's dev server on a localhost port outside the list", async () => {
+    stubElevenLabs();
+    const r = await worker.fetch(
+      req("/agent/token", { origin: "http://localhost:3000", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it("serves 127.0.0.1 on any port too", async () => {
+    const r = await worker.fetch(
+      req("/engine", { origin: "http://127.0.0.1:8080", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it("refuses a domain that only starts like localhost", async () => {
+    const r = await worker.fetch(
+      req("/agent/token", { origin: "http://localhost.evil.test", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(r.status).toBe(403);
+  });
+
+  it("refuses an unknown domain even with a live key", async () => {
+    const r = await worker.fetch(
+      req("/agent/token", { origin: "https://unknown.example.test", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(r.status).toBe(403);
+  });
+
+  it("keeps the admin API closed to calls without Origin", async () => {
+    const e = env();
+    const r = await worker.fetch(
+      new Request("https://worker.test/admin/keys", { headers: await signIn(e.KEYS) }),
+      e,
+    );
+    expect(r.status).toBe(403);
+  });
+
+  it("keeps the admin API closed to a localhost port outside the list", async () => {
+    const e = env();
+    const r = await worker.fetch(
+      req("/admin/keys", { method: "GET", origin: "http://localhost:3000", headers: await signIn(e.KEYS) }),
+      e,
+    );
+    expect(r.status).toBe(403);
+  });
+});
+
+describe("logging a refusal", () => {
+  const logged = (spy) => spy.mock.calls.map(([line]) => JSON.parse(line));
+
+  it("says why an origin was refused, and from where", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await worker.fetch(
+      req("/agent/token", { origin: "https://unknown.example.test", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(logged(log)).toEqual([
+      { reason: "origin_not_allowed", path: "/agent/token", origin: "https://unknown.example.test", method: "POST" },
+    ]);
+  });
+
+  it("says a key was refused without writing the key or the address down", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_secret_guess" } }), env());
+    const line = log.mock.calls.map(([l]) => l).join("\n");
+    expect(logged(log)[0].reason).toBe("key_invalid");
+    expect(line).not.toMatch(/vibe_secret_guess|203\.0\.113\.7/);
+  });
+
+  it("says a caller hit the rate limit", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await worker.fetch(
+      req("/agent/token", { headers: { "x-vibe-token": "vibe_el" } }),
+      env({ TOKEN_IP_LIMIT: fakeLimiter(0) }),
+    );
+    expect(logged(log)[0].reason).toBe("ip_rate_limited");
+  });
+
+  it("stays quiet when the request goes through", async () => {
+    stubElevenLabs();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await worker.fetch(req("/agent/token", { headers: { "x-vibe-token": "vibe_el" } }), env());
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
 describe("a pull request preview", () => {
   // Previews run unreviewed code, so their origin must never reach the admin API.
   const PREVIEW = "https://previews.example.test";
@@ -717,7 +837,15 @@ describe("limits per caller address", () => {
 });
 
 describe("limits on spending minutes", () => {
-  it("mints at most six tokens a minute for one key", async () => {
+  // 23.11: six a minute per key sent a candidate into 429 mid-interview.
+  it("is deployed with 20 tokens a minute per key and 30 per address", () => {
+    const toml = readFileSync(`${process.cwd()}/worker/wrangler.toml`, "utf8");
+    const limitOf = (name) =>
+      Number(toml.match(new RegExp(`name = "${name}"[\\s\\S]*?limit = (\\d+)`))[1]);
+    expect([limitOf("TOKEN_KEY_LIMIT"), limitOf("TOKEN_IP_LIMIT")]).toEqual([20, 30]);
+  });
+
+  it("stops minting for a key once its limiter runs out", async () => {
     const fetchSpy = stubElevenLabs();
     const limiter = fakeLimiter(6);
     const e = env({ TOKEN_KEY_LIMIT: limiter });
