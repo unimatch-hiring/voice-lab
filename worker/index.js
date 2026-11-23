@@ -20,9 +20,35 @@ const CANDIDATE_PATHS = ["/engine", "/agent/token", "/deepgram-token"];
 
 const originList = (value) => (value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+// A candidate's dev server may run on any port; the interview key still guards the call.
+const LOCAL_DEV = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
+
 function originAllowed(origin, path, env) {
   if (originList(env.ALLOWED_ORIGINS).includes(origin)) return true;
-  return CANDIDATE_PATHS.includes(path) && originList(env.PREVIEW_ORIGINS).includes(origin);
+  if (!CANDIDATE_PATHS.includes(path)) return false;
+  return LOCAL_DEV.test(origin) || originList(env.PREVIEW_ORIGINS).includes(origin);
+}
+
+/**
+ * One JSON line per refusal, so Workers Logs can answer "why did this candidate get a 403"
+ * after the fact. Only what is already public in the request line: no token, key or IP.
+ * A key id in an admin path is a hash, but it still names one key, so it is masked.
+ */
+function logRefusal(reason, req, path) {
+  console.log(JSON.stringify({
+    reason,
+    path: path.startsWith("/admin/keys/") ? "/admin/keys/:id" : path,
+    origin: req.headers.get("origin"),
+    method: req.method,
+  }));
+}
+
+/** signin.js answers its own refusals; this only reports them. */
+function reported(response, reason, req, path) {
+  if (response.status === 401 || response.status === 429) {
+    logRefusal(`${reason}_${response.status === 429 ? "rate_limited" : "rejected"}`, req, path);
+  }
+  return response;
 }
 
 function corsHeaders(req, env) {
@@ -203,12 +229,20 @@ export default {
         headers: { "content-type": "application/json", ...(cors ?? {}) },
       });
 
+    const path = new URL(req.url).pathname;
+    const refuse = (reason, status, error) => {
+      logRefusal(reason, req, path);
+      return json({ error }, status);
+    };
+
     // Unknown origin: we do not confirm the preflight, the browser blocks the
     // request itself. A body without CORS headers is unreadable to the caller anyway.
-    if (!cors) return json({ error: "origin not allowed" }, 403);
-    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-
-    const path = new URL(req.url).pathname;
+    // No Origin at all is a server or curl, not a browser: CORS does not apply and the key
+    // decides. Candidates write their own backend, so the candidate paths must answer it;
+    // the admin API never does.
+    const serverCall = !req.headers.has("origin") && CANDIDATE_PATHS.includes(path);
+    if (!cors && !serverCall) return refuse("origin_not_allowed", 403, "origin not allowed");
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors ?? {} });
 
     // Interview key management. Guarded by ADMIN_TOKEN, and answers 404 without a KV
     // namespace so a deployment that never bound one does not advertise the feature.
@@ -217,11 +251,11 @@ export default {
     // let a stranger enumerate who has access.
     if (path === "/admin/signin" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
-      return requestCode(req, env, json, ctx);
+      return reported(await requestCode(req, env, json, ctx), "signin", req, path);
     }
     if (path === "/admin/verify" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
-      return verifyCode(req, env, json, ctx);
+      return reported(await verifyCode(req, env, json, ctx), "verify", req, path);
     }
     if (path === "/admin/signout" && req.method === "POST") {
       if (!env.KEYS) return json({ error: "not found" }, 404);
@@ -236,7 +270,7 @@ export default {
       const who = signedIn ?? (path.startsWith("/admin/people") && bootstrapAllowed(req, env)
         ? "bootstrap"
         : null);
-      if (!who) return json({ error: "nope" }, 401);
+      if (!who) return refuse("admin_unauthorized", 401, "nope");
 
       if (path === "/admin/people") {
         if (req.method === "GET") return listPeople(env, json);
@@ -247,7 +281,9 @@ export default {
       }
 
       if (path.startsWith("/admin/keys")) {
-        if (req.method === "POST" && path === "/admin/keys") return issueInterviewKey(req, env, json, who);
+        if (req.method === "POST" && path === "/admin/keys") {
+          return reported(await issueInterviewKey(req, env, json, who), "mint", req, path);
+        }
         if (req.method === "GET" && path === "/admin/keys") return listInterviewKeys(env, json);
         // Keys are named by id, never by the key itself, so the key never sits in a URL or a log.
         const id = decodeURIComponent(path.slice("/admin/keys/".length));
@@ -263,19 +299,19 @@ export default {
 
     // The address limit comes first so guessing keys costs a stranger as much as using one.
     if (!(await withinLimit(env.TOKEN_IP_LIMIT, clientIp(req)))) {
-      return json({ error: "too many requests" }, 429);
+      return refuse("ip_rate_limited", 429, "too many requests");
     }
     const token = req.headers.get("x-vibe-token") ?? "";
     const who = await caller(token, env);
-    if (!who) return json({ error: "nope" }, 401);
+    if (!who) return refuse("key_invalid", 401, "nope");
     // Hashed so the limiter never holds a live credential; minting shares one budget.
     const bucket = `${path === "/engine" ? "engine" : "mint"}:${await sha256(token)}`;
     // Before the key's budget, so a request the key could never make does not spend it.
     if (ENDPOINT_ENGINE[path] && ENDPOINT_ENGINE[path] !== who.engine) {
-      return json({ error: "key is set to another engine" }, 403);
+      return refuse("engine_mismatch", 403, "key is set to another engine");
     }
     if (!(await withinLimit(env.TOKEN_KEY_LIMIT, bucket))) {
-      return json({ error: "too many requests" }, 429);
+      return refuse("key_rate_limited", 429, "too many requests");
     }
 
     // Asked before every conversation, so a switch in the admin page applies to the next one.

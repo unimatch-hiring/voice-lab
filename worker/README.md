@@ -94,8 +94,18 @@ After deploying, put the address you get
 ## Who may call it
 
 `ALLOWED_ORIGINS` in `wrangler.toml` is the list of origins the Worker answers.
-Everyone else gets `403`. Changing it needs no code edit: adjust `[vars]` and
-`wrangler deploy`.
+Changing it needs no code edit: adjust `[vars]` and `wrangler deploy`.
+
+The candidate's endpoints (`/engine`, `/agent/token`, `/deepgram-token`) answer more:
+`PREVIEW_ORIGINS`, `http://localhost` and `http://127.0.0.1` on any port (a candidate's
+dev server), and requests with no `Origin` at all (a candidate's own backend, or curl). The
+interview key is what guards them. Everything under `/admin/` answers `ALLOWED_ORIGINS`
+only; any other origin, or no origin, gets `403`.
+
+Every refusal — `403` origin, `401` key, `429` limit — writes one JSON line
+(`reason`, `path`, `origin`, `method`; never a token, key or IP) to Workers Logs:
+the dashboard under Workers → `voice-lab-token-minter` → Logs, or live with
+`npx wrangler tail voice-lab-token-minter --format pretty`.
 
 `PREVIEW_ORIGINS` is where pull request previews are served. They run unreviewed code,
 so they reach only the candidate's endpoints (`/engine`, `/agent/token`,
