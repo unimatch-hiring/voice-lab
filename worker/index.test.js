@@ -196,6 +196,16 @@ describe("who may call the candidate's endpoints", () => {
     expect(r.status).toBe(401);
   });
 
+  // 23.11: :5173 was taken, Vite moved to :5174, and the candidate got 403 mid-interview.
+  it("serves Vite when it falls back to the next port", async () => {
+    stubElevenLabs();
+    const r = await worker.fetch(
+      req("/agent/token", { origin: "http://localhost:5174", headers: { "x-vibe-token": "vibe_el" } }),
+      env(),
+    );
+    expect(r.status).toBe(200);
+  });
+
   it("serves a candidate's dev server on a localhost port outside the list", async () => {
     stubElevenLabs();
     const r = await worker.fetch(
