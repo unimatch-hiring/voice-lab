@@ -440,3 +440,13 @@ test("every new turn is announced, so per-turn readouts start over", async () =>
 
   expect(starts()).toBe(before + 1);
 });
+
+test("the backup engine has no conversation id to announce", async () => {
+  const { socket, events } = await harness();
+
+  socket.emit({ type: "ConversationText", role: "user", content: "hi" });
+  socket.emit({ type: "ConversationText", role: "assistant", content: "Hello there." });
+
+  expect(events.length, "the conversation did run").toBeGreaterThan(0);
+  expect(events.some((e) => e.type === "conversation-start")).toBe(false);
+});

@@ -1,4 +1,6 @@
-import { STAGE_ORDER, type StageName, type TurnMetrics } from "../lib/types";
+import { slowestStage } from "../lib/stageTiming";
+import { STAGE_ORDER, type TurnMetrics } from "../lib/types";
+import { StageShares } from "./StageShares";
 
 /**
  * What the finished turn actually cost, per stage.
@@ -21,52 +23,13 @@ export function StageBreakdown({ metrics }: { metrics: TurnMetrics | null }) {
     );
   }
 
-  const measured = STAGE_ORDER.filter((s) => metrics.stages[s] !== undefined);
-  // Not the sum of the stages: they overlap, and the sum counts that time twice.
-  const total = metrics.totalMs;
-  const slowest = measured.reduce<StageName | null>(
-    (worst, s) =>
-      worst === null || (metrics.stages[s] ?? 0) > (metrics.stages[worst] ?? 0) ? s : worst,
-    null,
-  );
+  const slowest = slowestStage(metrics.stages, STAGE_ORDER);
 
+  // totalMs is not the sum of the stages: they overlap, and the sum counts that time twice.
   return (
-    <div className="breakdown">
-      <div className="breakdown-head">
-        <span>this turn</span>
-        <span className="spacer" />
-        <span className="breakdown-total">
-          <b className="readout">{Math.round(total)}</b> ms end to end
-        </span>
-      </div>
-
-      <ol className="breakdown-rows">
-        {measured.map((stage) => {
-          const ms = metrics.stages[stage] ?? 0;
-          const share = total > 0 ? ms / total : 0;
-          return (
-            <li key={stage} data-slowest={stage === slowest}>
-              <span className="breakdown-name">{stage}</span>
-              <span className="breakdown-track">
-                <span
-                  className="breakdown-bar"
-                  style={{
-                    width: `${(share * 100).toFixed(2)}%`,
-                    background: `var(--stage-${stage})`,
-                  }}
-                />
-              </span>
-              <span className="breakdown-ms readout">{Math.round(ms)}</span>
-              <span className="breakdown-share readout">{Math.round(share * 100)}%</span>
-            </li>
-          );
-        })}
-      </ol>
-
-      <p className="breakdown-foot">
-        {slowest} dominated this turn. {metrics.llmTokens} tokens generated,{" "}
-        {metrics.ttsChars} characters spoken.
-      </p>
-    </div>
+    <StageShares label="this turn" stages={metrics.stages} totalMs={metrics.totalMs} order={STAGE_ORDER}>
+      {slowest} dominated this turn. {metrics.llmTokens} tokens generated, {metrics.ttsChars}{" "}
+      characters spoken.
+    </StageShares>
   );
 }

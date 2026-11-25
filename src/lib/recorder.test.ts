@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EventBus } from "./events";
-import { Recorder, fixtureFilename, toFixtureJson } from "./recorder";
+import { Recorder, fixtureFilename, lineFromEvent, toFixtureJson } from "./recorder";
 import type { TurnMetrics } from "./types";
 
 const METRICS: TurnMetrics = { stages: { llm: 120 }, totalMs: 120, llmTokens: 7, ttsChars: 42 };
@@ -101,5 +101,32 @@ describe("exporting a fixture", () => {
     const json = toFixtureJson(conversation);
     expect(json).toContain('\n  "lines"');
     expect(JSON.parse(json).lines[0].text).toBe("hi");
+  });
+});
+
+describe("reading a transcript line off a bus event", () => {
+  it("turns a recognised utterance into a user line", () => {
+    const line = lineFromEvent({ type: "stt-result", result: { text: "hello", words: [] } }, 120);
+    expect(line).toEqual({ speaker: "user", text: "hello", atMs: 120 });
+  });
+
+  it("turns an agent reply into an agent line", () => {
+    const line = lineFromEvent({ type: "agent-reply", text: "hi there", at: 0 }, 400);
+    expect(line).toEqual({ speaker: "agent", text: "hi there", atMs: 400 });
+  });
+
+  it("trims the text", () => {
+    const line = lineFromEvent({ type: "agent-reply", text: "  hi \n", at: 0 }, 0);
+    expect(line?.text).toBe("hi");
+  });
+
+  it("carries no line for blank text", () => {
+    expect(lineFromEvent({ type: "stt-result", result: { text: "   ", words: [] } }, 0)).toBeNull();
+    expect(lineFromEvent({ type: "agent-reply", text: "\n\t", at: 0 }, 0)).toBeNull();
+    expect(lineFromEvent({ type: "agent-reply", text: "", at: 0 }, 0)).toBeNull();
+  });
+
+  it("carries no line for an event that is not speech", () => {
+    expect(lineFromEvent({ type: "turn-start", at: 0 }, 0)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickRoute } from "./route";
+import { historyHref, historyIdFrom, pickRoute } from "./route";
 
 describe("pickRoute", () => {
   it("opens the admin page on the main site", () => {
@@ -16,5 +16,20 @@ describe("pickRoute", () => {
 
   it("opens the bench", () => {
     expect(pickRoute("?bench", false)).toBe("bench");
+  });
+
+  it("opens the history list and a conversation from it", () => {
+    expect(pickRoute("?history", false)).toBe("history");
+    expect(pickRoute("?history=conv_1", false)).toBe("history");
+  });
+});
+
+describe("history addresses", () => {
+  it("reads no conversation id for the list", () => {
+    expect(historyIdFrom("?history")).toBeNull();
+  });
+
+  it("reads back the id a conversation link carries", () => {
+    expect(historyIdFrom(historyHref("conv/1 & 2"))).toBe("conv/1 & 2");
   });
 });

@@ -1,5 +1,5 @@
 import type { EventBus } from "./events";
-import type { TurnMetrics } from "./types";
+import type { PipelineEvent, TurnMetrics } from "./types";
 
 /**
  * Records conversations off the event stream so we can export them as fixtures.
@@ -22,6 +22,24 @@ export interface RecordedConversation {
   lines: RecordedLine[];
   /** One entry per completed turn, in order. */
   turns: TurnMetrics[];
+}
+
+/** The transcript line a bus event carries, or null when it carries none (other events, blank text). */
+export function lineFromEvent(e: PipelineEvent, atMs: number): RecordedLine | null {
+  let speaker: RecordedLine["speaker"];
+  let text: string;
+  if (e.type === "stt-result") {
+    speaker = "user";
+    text = e.result.text;
+  } else if (e.type === "agent-reply") {
+    speaker = "agent";
+    text = e.text;
+  } else {
+    return null;
+  }
+
+  const trimmed = text.trim();
+  return trimmed ? { speaker, text: trimmed, atMs } : null;
 }
 
 export class Recorder {
@@ -54,11 +72,9 @@ export class Recorder {
     this.origin = this.now();
 
     this.unsubscribe = this.bus.on((e) => {
-      if (e.type === "stt-result") {
-        this.push("user", e.result.text);
-      } else if (e.type === "agent-reply") {
-        this.push("agent", e.text);
-      }
+      const line = lineFromEvent(e, 0);
+      if (!line) return;
+      this.lines.push({ ...line, atMs: Math.round(this.now() - this.origin) });
     });
   }
 
@@ -84,12 +100,6 @@ export class Recorder {
       lines: this.lines,
       turns: this.turns,
     };
-  }
-
-  private push(speaker: RecordedLine["speaker"], text: string): void {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    this.lines.push({ speaker, text: trimmed, atMs: Math.round(this.now() - this.origin) });
   }
 }
 
