@@ -63,9 +63,8 @@ export class Recorder {
   }
 
   /**
-   * Completed turns arrive through the session's `onTurn` callback rather than the bus —
-   * `turn-end` is declared in the event union but nothing emits it — so the caller hands
-   * them over. Recording metrics off a `turn-end` subscription would silently record none.
+   * Completed turns are handed over from the session's `onTurn` callback, the same place
+   * the page takes its metrics from, rather than read off the bus.
    */
   addTurn(metrics: TurnMetrics): void {
     if (this.unsubscribe) this.turns.push(metrics);

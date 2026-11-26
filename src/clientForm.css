@@ -1,0 +1,74 @@
+.client-form {
+  display: grid;
+  gap: 12px;
+}
+
+.client-form label {
+  display: grid;
+  gap: 6px;
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.client-form input {
+  padding: 10px 12px;
+  font: 14px/1.2 var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+}
+
+.client-form .form-service {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--field-edge);
+}
+
+.client-form .form-service h3 {
+  margin: 0;
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.client-form .form-service p {
+  margin: 0;
+  font: 15px/1.45 var(--sans);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.client-form .form-service .form-service-empty {
+  color: var(--ink-dim);
+}
+
+.client-form input[aria-invalid="true"] {
+  border-color: var(--fail);
+}
+
+.client-form input:focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: 1px;
+}
+
+.client-form .field-error {
+  font: 12px/1.2 var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fail);
+}
+
+/* The look comes from the button rules in scene/tokens.css; only placement is here. */
+.client-form .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

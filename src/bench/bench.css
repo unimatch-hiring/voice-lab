@@ -25,21 +25,6 @@
   color: var(--rack-ink);
 }
 
-.bench-cut {
-  appearance: none;
-  font: 600 13px/1 var(--sans);
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--fail);
-  background: transparent;
-  color: var(--fail);
-  cursor: pointer;
-}
-
-.bench-cut:hover {
-  background: color-mix(in srgb, var(--fail) 14%, transparent);
-}
-
 /* Label and value on one row each: the readout is scanned, not read, so the values
    line up in a column of their own. */
 .bench-readout {

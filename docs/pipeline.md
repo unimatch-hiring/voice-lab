@@ -64,6 +64,47 @@ role it opened with, so switching roles means a new session. And the agent must 
 override: with it disallowed the server closes the connection instead of ignoring the
 field, which reaches the page as a dropped conversation rather than an error about prompts.
 
+## Form, tools and fact marks
+
+Three observers sit on the bus beside the scene; none of them is in the session.
+
+- [`supervisor.ts`](../src/lib/supervisor.ts) fills the form without relying on tool calls.
+  On `agent-reply` it parses the read-back the prompt prescribes ("Записываю телефон: … Верно?",
+  [`readBack.ts`](../src/lib/readBack.ts)) and holds it until the next `stt-result`: only a "да"
+  puts it in the form, so a mis-heard value never lands. A date is put through the tools' own check (`dateRefusal`: a real day, not gone, not a Sunday) in whatever form it was read back, and is not filled otherwise. A name, phone
+  or plate the customer said themselves waits the same way: it is filled once the agent repeats
+  it, in any wording, and the customer says yes. It sends, once each, a stop-driving hint for
+  unsafe symptoms and a correction when the agent claims a booking before `book_appointment` has succeeded. Both
+  sessions emit `turn-end` where they report a turn (listening resumes), and on it the supervisor
+  sends the "form still missing" nudge, once per change in what is missing.
+- [`tools.ts`](../src/lib/tools.ts) is the one tool list for both engines: `search_services`,
+  `find_slots`, `book_appointment`, `update_form`. Each run emits `tool-result` with the facts it
+  handed the agent. **On ElevenLabs they run only if the same names are declared as client tools
+  on the agent in the dashboard**; undeclared, the agent never calls them and only the
+  supervisor fills the form.
+  Confirmation is explicit state, not the model's word: [`confirmed.ts`](../src/lib/confirmed.ts)
+  is a per-call ledger the supervisor adds to on each yes to a read-back, and `update_form`
+  saves a value only if it is in the ledger (phones compared by their last ten digits),
+  answering `not confirmed` for the rest. A value typed into the form or kept from an earlier
+  call is not a confirmation, and Clear profile emits `profile-cleared`, on which the supervisor
+  drops the ledger along with the value waiting for a yes and what the customer had said. `find_slots` and `book_appointment` refuse a time already gone
+  today as well as a day already gone, and a booking needs the form valid, not merely filled.
+- [`annotate.ts`](../src/scene/annotate.ts) marks the agent's words in the transcript: a name or
+  number is a *fact* when the prompt's shop facts and price list or a `tool-result` back it, and
+  an *assumption* otherwise, as are hedge words. A fact line written `subject: values`
+  (`Замена масла, Oil change: 2500 ₽, 30 min`) binds its values to that subject, and a number
+  is checked as subject → field → value → unit:
+  - the subject is the service named in the same clause, else the same sentence, else the last
+    one named in the reply; with none named, every source is searched;
+  - the field is the unit: a price beside a service must be *that* service's price, and
+    "6 months" backs neither "6 лет" nor "6 минут";
+  - a day followed by a month name must match a known date in both; a phone's digits back only
+    a bare number; a number after "не"/"not" is never a fact, across a range too
+    ("не с 09:00 до 19:00").
+
+  It is a heuristic on text, not a check of the agent's reasoning: two services swapped inside
+  one clause still pass.
+
 ## Backup engine: Deepgram
 
 When ElevenLabs is down, a key can be switched to [Deepgram's Voice Agent
@@ -80,7 +121,11 @@ What differs, and why the page says so:
 - The role, the models and the functions go in `Settings`. Functions run in the page:
   `FunctionCallRequest` → `FunctionCallResponse` with the same `id`, and nothing for a
   call named in `FunctionCallCancelled`.
-- `sendText` and `injectAgentMessage` map to `InjectUserMessage` and `InjectAgentMessage`.
+- `sendUserMessage`, `sendContextualUpdate` and `injectAgentMessage` map to `InjectUserMessage`,
+  `UpdatePrompt` (appends, never replaces) and `InjectAgentMessage`. So on Deepgram every
+  supervisor nudge stays in the prompt: "Form still missing: phone" outlives the phone being
+  given, and nothing is sent once the form is complete. The same text is appended only once
+  per call. Treat nudges there as advisory.
 - `UserStartedSpeaking` is the barge-in signal: queued agent audio is dropped. A reply ends
   when local playback drains, not at `AgentAudioDone`, which only means the last chunk left
   the server.
