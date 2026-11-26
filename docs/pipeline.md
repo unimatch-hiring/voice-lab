@@ -58,7 +58,10 @@ detector is theirs, playback is theirs.
 ## Who decides the role
 
 The prompt the agent answers with is not the one configured in the ElevenLabs dashboard:
-`src/lib/persona.ts` overrides it in the handshake (`conversation_initiation_client_data`).
+The page overrides it in the handshake (`conversation_initiation_client_data`) with
+`buildChildPrompt` (`src/lib/parental/childPrompt.ts`) — the parent's settings, read on every
+start — sent through `src/lib/pipeline/elevenLabsClient.ts`; `src/lib/persona.ts` is the
+fallback when no prompt is passed.
 Two consequences. It applies **once, at session start** — a running conversation keeps the
 role it opened with, so switching roles means a new session. And the agent must permit the
 override: with it disallowed the server closes the connection instead of ignoring the

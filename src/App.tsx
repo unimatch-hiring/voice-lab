@@ -8,11 +8,17 @@ import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
 import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
+import { buildChildPrompt } from "./lib/parental/childPrompt";
+import { createParentApi } from "./lib/parental/parentApi";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
 import { Mouth } from "./scene/Mouth";
 import "./scene/tokens.css";
+
+const SETTINGS_UNAVAILABLE =
+  "The parent's settings could not be loaded, so the conversation was not started. " +
+  "Start the parental server with npm run server and try again.";
 
 /**
  * Turns a failed start into something the visitor can act on. The browser's own wording
@@ -96,6 +102,7 @@ export function App() {
     () => createTransport({ workerUrl: config.workerUrl, vibeToken: config.vibeToken }),
     [config],
   );
+  const parentApi = useMemo(() => createParentApi(), []);
 
   // The engine is set per key in the admin page and can be switched mid-session, so it
   // is asked for on load (for the notice) and again before every conversation.
@@ -178,6 +185,14 @@ export function App() {
     setStarting(true);
     try {
       setEndedBy(null);
+      // Read on every start: the role is fixed for the session once it opens, and a child
+      // must never get an assistant that ignores what the parent set.
+      const settings = await parentApi.getSettings().catch(() => null);
+      if (!mountedRef.current) return;
+      if (!settings) {
+        setError(SETTINGS_UNAVAILABLE);
+        return;
+      }
       if (recording) {
         setSavedAs(null);
         recorder.start();
@@ -188,7 +203,10 @@ export function App() {
       setEngine(current);
       engineRef.current = current;
       const generation = generationRef.current;
-      const session = createSession(current, sessionDeps);
+      const session = createSession(current, {
+        ...sessionDeps,
+        prompt: buildChildPrompt(settings),
+      });
       sessionRef.current = session;
       await session.start();
       // Torn down mid-start: stop() then found nothing open yet, so the session is ours to close.

@@ -2,6 +2,7 @@ import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { App, startFailureMessage } from "./App";
 import { WorkerError } from "./lib/transport";
+import { EMPTY_SETTINGS } from "./lib/parental/types";
 
 // jsdom has no IndexedDB, so the store is faked.
 let stored = "";
@@ -22,6 +23,11 @@ vi.mock("./lib/pipeline/createSession", () => ({
     start: () => (startFails ? Promise.reject(startFails) : Promise.resolve()),
     stop: () => Promise.resolve(),
   }),
+}));
+
+// The parental server is not under test here; a start always finds the parent's settings.
+vi.mock("./lib/parental/parentApi", () => ({
+  createParentApi: () => ({ getSettings: () => Promise.resolve(EMPTY_SETTINGS) }),
 }));
 
 beforeEach(() => {

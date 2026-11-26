@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { EMPTY_SETTINGS, type ParentSettings } from "./lib/parental/types";
+import type { SessionDeps } from "./lib/pipeline/session";
 
 vi.mock("./lib/tokenStore", () => ({
   loadToken: () => Promise.resolve("vibe_test"),
@@ -12,13 +14,15 @@ interface FakeSession {
   isRunning: boolean;
   finishStart: () => void;
   stop: ReturnType<typeof vi.fn>;
+  deps: SessionDeps;
 }
 const created: FakeSession[] = [];
 
 vi.mock("./lib/pipeline/createSession", () => ({
-  createSession: () => {
+  createSession: (_engine: string, deps: SessionDeps) => {
     let finishStart = () => {};
     const session = {
+      deps,
       isRunning: false,
       finishStart: () => finishStart(),
       mouthSpectrum: () => null,
@@ -38,8 +42,12 @@ vi.mock("./lib/pipeline/createSession", () => ({
   },
 }));
 
+const parent = vi.hoisted(() => ({ getSettings: vi.fn<() => Promise<ParentSettings>>() }));
+vi.mock("./lib/parental/parentApi", () => ({ createParentApi: () => parent }));
+
 beforeEach(() => {
   created.length = 0;
+  parent.getSettings.mockResolvedValue(EMPTY_SETTINGS);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
 });
 
@@ -86,4 +94,27 @@ test("a session still starting when the page goes away is closed once it opens",
   await act(async () => created[0].finishStart());
 
   expect(created[0].isRunning).toBe(false);
+});
+
+test("the conversation opens with what the parent set", async () => {
+  parent.getSettings.mockResolvedValue({
+    ...EMPTY_SETTINGS,
+    childProfile: "Masha, 7, loves drawing",
+    blockedTopics: "horror films",
+  });
+  render(<App />);
+  fireEvent.click(await startButton());
+
+  await waitFor(() => expect(created).toHaveLength(1));
+  expect(created[0].deps.prompt).toContain("Masha, 7, loves drawing");
+  expect(created[0].deps.prompt).toContain("horror films");
+});
+
+test("without the parent's settings no conversation starts", async () => {
+  parent.getSettings.mockRejectedValue(new Error("server down"));
+  render(<App />);
+  fireEvent.click(await startButton());
+
+  expect(await screen.findByText(/settings could not be loaded/i)).toBeTruthy();
+  expect(created).toHaveLength(0);
 });
