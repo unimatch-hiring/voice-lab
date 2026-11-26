@@ -201,3 +201,10 @@ describe("the backup engine notice", () => {
     expect(screen.queryByText(/backup engine/i)).toBeNull();
   });
 });
+
+test("the parent page is one link away from the assistant", async () => {
+  render(<App />);
+
+  const link = await screen.findByRole("link", { name: /for parents/i });
+  expect(link.getAttribute("href")).toBe("?parent");
+});

@@ -6,6 +6,8 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: process.env.BASE_PATH ?? "/voice-lab/",
   plugins: [react()],
+  // The parental server (`npm run server`) shares the page's origin in dev, so no CORS.
+  server: { proxy: { "/api": "http://localhost:8790" } },
   // An agent harness can put a worktree — with its own copy of every test — inside the
   // repo. Without this the suite collects those too and reports failures nobody wrote.
   test: {

@@ -17,4 +17,9 @@ describe("pickRoute", () => {
   it("opens the bench", () => {
     expect(pickRoute("?bench", false)).toBe("bench");
   });
+
+  it("opens the parent page, in a preview build too", () => {
+    expect(pickRoute("?parent", false)).toBe("parent");
+    expect(pickRoute("?parent", true)).toBe("parent");
+  });
 });

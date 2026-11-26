@@ -224,6 +224,9 @@ export function App() {
           milliseconds it actually took, and the character articulates the reply from the
           real loudness of the voice you are hearing.
         </p>
+        <p>
+          <a href="?parent">For parents</a>
+        </p>
       </header>
 
       <section className="panel">
