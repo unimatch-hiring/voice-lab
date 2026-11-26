@@ -18,6 +18,9 @@ export interface InterviewKey {
   engine: Engine;
   issuedAt: number;
   expiresAt: number;
+  /** Dollars the key may spend through the Worker's LLM proxy, and has spent so far. */
+  budgetUsd?: number;
+  spentUsd?: number;
 }
 
 /** What issuing returns: the only answer that carries the full key, to hand to the candidate. */
@@ -130,3 +133,14 @@ export function formatRemaining(expiresAt: number, now: number): string {
   const m = minutes % 60;
   return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
 }
+
+/** "LLM $0.42 / $5": an older Worker sends no budget, and then there is nothing to show. */
+export function formatSpend(spentUsd: number | undefined, budgetUsd: number | undefined): string {
+  if (budgetUsd === undefined) return "";
+  const dollars = (usd: number) => `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}`;
+  return `LLM ${dollars(spentUsd ?? 0)} / ${dollars(budgetUsd)}`;
+}
+
+/** Spent enough that the next few calls may be refused: worth a glance mid-interview. */
+export const nearBudget = (spentUsd = 0, budgetUsd?: number) =>
+  budgetUsd !== undefined && spentUsd >= budgetUsd * 0.8;

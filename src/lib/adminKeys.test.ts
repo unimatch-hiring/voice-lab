@@ -3,6 +3,8 @@ import {
   AdminUnauthorized,
   createAdminClient,
   formatRemaining,
+  formatSpend,
+  nearBudget,
   requestCode,
   verifyCode,
 } from "./adminKeys";
@@ -113,5 +115,19 @@ describe("remaining time", () => {
 
   it("says expired rather than counting negative", () => {
     expect(formatRemaining(now - 60_000, now)).toBe("expired");
+  });
+});
+
+describe("LLM spending", () => {
+  it("shows cents spent against the whole-dollar budget", () => {
+    expect(formatSpend(0.4213, 5)).toBe("LLM $0.42 / $5");
+  });
+
+  it("shows nothing for a Worker that predates budgets", () => {
+    expect(formatSpend(undefined, undefined)).toBe("");
+  });
+
+  it("flags a key at four fifths of its budget, not before", () => {
+    expect([nearBudget(3.99, 5), nearBudget(4, 5)]).toEqual([false, true]);
   });
 });

@@ -3,6 +3,8 @@ import {
   AdminUnauthorized,
   createAdminClient,
   formatRemaining,
+  formatSpend,
+  nearBudget,
   requestCode,
   verifyCode,
   type InterviewKey,
@@ -295,6 +297,9 @@ export function Admin() {
                   <span className="admin-who">{k.label || "unnamed"}</span>
                   <code className="admin-token">{k.hint}</code>
                   <span className="admin-left">{formatRemaining(k.expiresAt, now)}</span>
+                  <span className="admin-spend" data-near={nearBudget(k.spentUsd, k.budgetUsd)}>
+                    {formatSpend(k.spentUsd, k.budgetUsd)}
+                  </span>
                   <span className="admin-engine" data-engine={k.engine}>
                     {ENGINE_LABEL[k.engine]}
                   </span>
