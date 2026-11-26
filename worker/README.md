@@ -164,7 +164,10 @@ const client = new OpenAI({ baseURL: `${WORKER_URL}/llm/v1`, apiKey: process.env
 What a call may do:
 
 - **Models**: `LLM_MODELS` in `wrangler.toml`, cheap text models (`openai/gpt-4o-mini` and a
-  few of its price class). Anything else is `400` and lists the allowed ones.
+  few of its price class), no reasoning models. Anything else is `400` and lists the allowed
+  ones. A model added there must cost under $10 per million tokens, see the budget below.
+- **Input**: text only — `content` a string or parts of `type: "text"`; images, audio and
+  files are `400`. `tools` only of `type: "function"`. The body is at most 64 kB (`413`).
 - **`max_tokens`**: at most `LLM_MAX_TOKENS` (1024), and that when the call names none.
   Above it is `400`.
 - **Streaming**: refused with `400`. A stream's cost arrives in its last chunk, and the
@@ -173,17 +176,20 @@ What a call may do:
   `n` other than 1 is `400`.
 
 **Budget.** Every key carries `budgetUsd`, $5 unless a smaller one is given at issue (more
-is refused). After each call the Worker adds the cost OpenRouter reports (`usage.cost`;
-it asks for it with `usage: {include: true}`) to the key's tally. Once the tally reaches the
-budget the next call is `402` (`insufficient_quota`, "this key has used its LLM budget"),
-and nothing goes to OpenRouter. The check comes before a call and the charge after it, so
-calls already in flight can take a key a few cents past $5 — `max_tokens` bounds each one.
-An answer without a cost is charged at $10 per million tokens, above every listed model.
+is refused). Before a call the Worker reserves its worst case from the key's tally: input
+bytes plus `max_tokens`, at $10 per million tokens, above every listed model (a byte-level
+tokenizer makes at most one token per byte). A classifier call reserves about $0.03. If the
+reservation does not fit what is left, the call is `402` (`insufficient_quota`) and nothing
+goes to OpenRouter. After the answer the Worker refunds the difference to the cost
+OpenRouter reports (`usage.cost`, asked for with `usage: {include: true}`). So parallel calls
+cannot overspend together, a caller who hangs up mid-call keeps paying the reservation, and
+an answer without a cost keeps it in full. An error answer from OpenRouter is refunded.
 
 The tally lives in a Durable Object per key (`LlmBudget`, `llm.js`), not in KV: KV loses
 updates when parallel calls each read-modify-write it, and refuses more than one write a
 second per key. The object drops its tally when the key expires. Revoking or switching a
-key's engine leaves the tally as it is.
+key's engine leaves the tally as it is. A revoked key can still reach the proxy for up to a
+minute: KV reads are cached at the edge.
 
 OpenRouter refusing our own key (`401`/`402`/`403`, e.g. the account ran out of credits)
 reaches the candidate as `502` "tell the interviewer", so it does not read as their key or

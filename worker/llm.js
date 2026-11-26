@@ -1,7 +1,7 @@
 /**
  * OpenAI-compatible proxy to OpenRouter for the candidate's own server. The candidate holds
  * only their interview key; OPENROUTER_API_KEY stays a Worker secret. Every key has a dollar
- * budget, counted from the cost OpenRouter reports for each call.
+ * budget: each call reserves its worst case up front and gets back what OpenRouter did not bill.
  */
 
 import { clientIp, sha256, withinLimit } from "./signin.js";
@@ -17,29 +17,30 @@ export const DEFAULT_MODELS = [
   "openai/gpt-4o-mini",
   "openai/gpt-4.1-mini",
   "openai/gpt-4.1-nano",
-  "openai/gpt-5-nano",
   "google/gemini-2.5-flash-lite",
-  "google/gemini-2.5-flash",
   "meta-llama/llama-3.3-70b-instruct",
   "mistralai/mistral-small-3.2-24b-instruct",
   "qwen/qwen3-30b-a3b-instruct-2507",
 ];
 export const DEFAULT_MAX_TOKENS = 1024;
-const MAX_BODY_CHARS = 200_000;
+/** A classifier call is a couple of kilobytes; this keeps one call's reservation under $0.70. */
+export const MAX_BODY_BYTES = 64_000;
 
 /**
- * Charged when OpenRouter's answer carries no cost: above the dearest listed model, so a
- * missing field can only make a key run out sooner, never let it overspend.
+ * The price a reservation assumes for every token, in and out. It must stay above the dearest
+ * model in LLM_MODELS (gpt-4.1-mini, $1.60/M out), or a reservation could be smaller than the bill.
  */
-const FALLBACK_USD_PER_TOKEN = 10 / 1_000_000;
+export const CEILING_USD_PER_TOKEN = 10 / 1_000_000;
+/** Chat-template tokens a provider adds around each message. */
+const PER_MESSAGE_TOKENS = 16;
 
 /**
  * Only these request fields reach OpenRouter. Anything else is dropped, notably `models`
  * (fallback routing would bypass the model list), `plugins` and `web_search_options`
- * (billed on top of tokens) and `stream`.
+ * (billed on top of tokens) and `stream`. `messages` is rebuilt, see `textMessage`.
  */
 const FORWARDED = [
-  "model", "messages", "max_tokens", "temperature", "top_p", "top_k", "stop", "seed",
+  "model", "max_tokens", "temperature", "top_p", "top_k", "stop", "seed",
   "response_format", "tools", "tool_choice", "presence_penalty", "frequency_penalty",
   "repetition_penalty", "logprobs", "top_logprobs",
 ];
@@ -71,8 +72,8 @@ export function parseBudget(value) {
 /**
  * One Durable Object per key, named by the key's hash. KV cannot count — parallel
  * read-modify-writes lose updates, and it allows one write per second per key — while a
- * candidate's server easily fires several calls at once. Storage writes here are synchronous,
- * so each charge is atomic. The alarm drops the tally when the key itself expires.
+ * candidate's server easily fires several calls at once. Storage reads and writes here are
+ * synchronous, so check-and-reserve is atomic. The alarm drops the tally when the key expires.
  */
 export class LlmBudget {
   constructor(state) {
@@ -80,16 +81,27 @@ export class LlmBudget {
   }
 
   async fetch(req) {
-    const { op, micros = 0, expiresAt } = await req.json();
+    const { op, micros = 0, limitMicros = 0, expiresAt } = await req.json();
     const kv = this.storage.kv;
     const spent = kv.get("spentMicros") ?? 0;
     if (op === "read") return Response.json({ spentMicros: spent });
-    if (op !== "charge") return Response.json({ error: "unknown op" }, { status: 400 });
 
-    const next = spent + Math.max(0, Math.round(micros));
-    kv.put("spentMicros", next);
-    if (expiresAt) await this.storage.setAlarm(expiresAt);
-    return Response.json({ spentMicros: next });
+    if (op === "reserve") {
+      const hold = Math.max(0, Math.round(micros));
+      if (spent + hold > limitMicros) return Response.json({ ok: false, spentMicros: spent });
+      kv.put("spentMicros", spent + hold);
+      if (expiresAt) await this.storage.setAlarm(expiresAt);
+      return Response.json({ ok: true, spentMicros: spent + hold });
+    }
+
+    // The difference between the bill and the reservation; negative is a refund.
+    if (op === "settle") {
+      const next = Math.max(0, spent + Math.round(micros));
+      kv.put("spentMicros", next);
+      return Response.json({ spentMicros: next });
+    }
+
+    return Response.json({ error: "unknown op" }, { status: 400 });
   }
 
   async alarm() {
@@ -103,13 +115,13 @@ async function meter(env, tokenHash, op, args = {}) {
     method: "POST",
     body: JSON.stringify({ op, ...args }),
   });
-  return (await r.json()).spentMicros;
+  return r.json();
 }
 
 /** What the key has spent so far, in dollars; 0 where no meter is bound. */
 export async function spentUsd(env, tokenHash) {
   if (!env.LLM_BUDGET) return 0;
-  return toUsd(await meter(env, tokenHash, "read"));
+  return toUsd((await meter(env, tokenHash, "read")).spentMicros);
 }
 
 /** Bearer, as every OpenAI client sends it; x-vibe-token, as the rest of this Worker takes it. */
@@ -125,12 +137,36 @@ const failure = (message, type) => ({ error: { message, type } });
 /** Never trust an upstream text not to echo what we sent it. */
 const redact = (text, secret) => (secret ? text.split(secret).join("[redacted]") : text);
 
-function costOf(usage) {
-  if (typeof usage?.cost === "number") return { usd: usage.cost, estimated: false };
-  const tokens = Number(usage?.total_tokens) ||
-    (Number(usage?.prompt_tokens) || 0) + (Number(usage?.completion_tokens) || 0);
-  // No usage at all still cost something; charge as if the whole completion budget was used.
-  return { usd: (tokens || DEFAULT_MAX_TOKENS) * FALLBACK_USD_PER_TOKEN, estimated: true };
+const bytes = (value) => new TextEncoder().encode(JSON.stringify(value ?? null)).length;
+
+/**
+ * The most a call can cost. Byte-level tokenizers make at most one token per UTF-8 byte, so
+ * the input's bytes bound its tokens; max_tokens bounds the output, reasoning included.
+ */
+function worstCaseUsd(body) {
+  const input = bytes(body.messages) + bytes(body.tools) + bytes(body.response_format) +
+    body.messages.length * PER_MESSAGE_TOKENS;
+  return (input + body.max_tokens) * CEILING_USD_PER_TOKEN;
+}
+
+const ROLES = ["system", "developer", "user", "assistant", "tool"];
+const MESSAGE_FIELDS = ["role", "content", "name", "tool_calls", "tool_call_id"];
+
+/**
+ * Text only. Images, audio and files are billed by rules a byte count does not bound, so the
+ * reservation could not cover them. Returns the message as forwarded, or null.
+ */
+function textMessage(message) {
+  if (!message || typeof message !== "object" || !ROLES.includes(message.role)) return null;
+  const { content } = message;
+  const isText = typeof content === "string" ||
+    (content == null && message.role === "assistant") ||
+    (Array.isArray(content) && content.every((part) =>
+      part?.type === "text" && typeof part.text === "string"));
+  if (!isText) return null;
+  const parts = Array.isArray(content) ? content.map(({ text }) => ({ type: "text", text })) : content;
+  const kept = Object.fromEntries(MESSAGE_FIELDS.filter((k) => k in message).map((k) => [k, message[k]]));
+  return { ...kept, content: parts };
 }
 
 /** Builds the body OpenRouter gets, or returns the reason the request is refused. */
@@ -142,6 +178,13 @@ function upstreamBody(body, env) {
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return { error: "messages must be a non-empty array" };
   }
+  const messages = body.messages.map(textMessage);
+  if (messages.includes(null)) {
+    return { error: "messages may carry text only: a string content or parts of type \"text\"" };
+  }
+  if (body.tools !== undefined && !(Array.isArray(body.tools) && body.tools.every((t) => t?.type === "function"))) {
+    return { error: "tools may only be of type \"function\"" };
+  }
   if (body.n !== undefined && body.n !== 1) return { error: "n must be 1" };
 
   const cap = maxTokens(env);
@@ -152,7 +195,7 @@ function upstreamBody(body, env) {
 
   const forwarded = Object.fromEntries(FORWARDED.filter((k) => k in body).map((k) => [k, body[k]]));
   return {
-    body: { ...forwarded, max_tokens: asked ?? cap, stream: false, usage: { include: true } },
+    body: { ...forwarded, messages, max_tokens: asked ?? cap, stream: false, usage: { include: true } },
   };
 }
 
@@ -160,7 +203,7 @@ function upstreamBody(body, env) {
  * Handles everything under /llm/v1/. `json` carries the CORS headers; `refuse` also logs
  * the refusal, without the key.
  */
-export async function handleLlm(req, env, { path, json, refuse }) {
+export async function handleLlm(req, env, ctx, { path, json, refuse }) {
   const refused = (reason, status, message, type = "invalid_request_error") => {
     refuse(reason);
     return json(failure(message, type), status);
@@ -171,8 +214,11 @@ export async function handleLlm(req, env, { path, json, refuse }) {
   }
   const token = presentedToken(req);
   const raw = token && env.KEYS ? await env.KEYS.get(`key:${token}`) : null;
-  if (raw === null) return refused("llm_key_invalid", 401, "invalid interview key", "authentication_error");
-  const record = JSON.parse(raw);
+  const record = raw === null ? null : JSON.parse(raw);
+  // KV drops an expired key on its own, but not to the second.
+  if (!record || (record.expiresAt && record.expiresAt <= Date.now())) {
+    return refused("llm_key_invalid", 401, "invalid interview key", "authentication_error");
+  }
   const tokenHash = await sha256(token);
   if (!(await withinLimit(env.LLM_LIMIT, `key:${tokenHash}`))) {
     return refused("llm_key_rate_limited", 429, "too many requests", "rate_limit_error");
@@ -189,7 +235,7 @@ export async function handleLlm(req, env, { path, json, refuse }) {
   }
 
   const text = await req.text();
-  if (text.length > MAX_BODY_CHARS) return refused("llm_body_too_large", 413, "request body too large");
+  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return refused("llm_body_too_large", 413, "request body too large");
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -199,18 +245,31 @@ export async function handleLlm(req, env, { path, json, refuse }) {
   const built = upstreamBody(parsed, env);
   if (built.error) return refused("llm_bad_request", 400, built.error);
 
-  // Checked before the call, charged after it: a call in flight can take a key a few cents
-  // past its budget, never further, since max_tokens bounds what one call costs.
+  // The worst case is taken from the budget before the call, so parallel calls cannot
+  // overspend it together, and a caller who hangs up mid-call keeps paying the reservation.
   const budget = budgetUsdOf(record);
-  const spent = toUsd(await meter(env, tokenHash, "read"));
-  if (spent >= budget) {
+  const hold = toMicros(worstCaseUsd(built.body));
+  const reserved = await meter(env, tokenHash, "reserve", {
+    micros: hold,
+    limitMicros: toMicros(budget),
+    expiresAt: record.expiresAt,
+  });
+  if (!reserved.ok) {
+    const spent = toUsd(reserved.spentMicros);
     return refused(
       "llm_budget_exhausted",
       402,
-      `this key has used its LLM budget: $${spent.toFixed(2)} of $${budget.toFixed(2)}`,
+      `this key has used its LLM budget: $${spent.toFixed(2)} of $${budget.toFixed(2)}; ` +
+        `this call needs up to $${toUsd(hold).toFixed(2)}, a smaller max_tokens or prompt needs less`,
       "insufficient_quota",
     );
   }
+  // waitUntil, so the refund still lands if the caller is gone by then.
+  const settle = (billedUsd) => {
+    const done = meter(env, tokenHash, "settle", { micros: toMicros(billedUsd) - hold });
+    ctx?.waitUntil?.(done);
+    return done;
+  };
 
   let upstream;
   try {
@@ -224,6 +283,7 @@ export async function handleLlm(req, env, { path, json, refuse }) {
       body: JSON.stringify(built.body),
     });
   } catch {
+    await settle(0);
     return json(failure("llm provider unreachable", "server_error"), 502);
   }
 
@@ -234,6 +294,14 @@ export async function handleLlm(req, env, { path, json, refuse }) {
   } catch {
     // Not JSON: nothing to charge and nothing worth relaying.
   }
+
+  // No cost reported: the reservation stands, which is never less than the bill.
+  const billed = typeof payload?.usage?.cost === "number" ? payload.usage.cost : null;
+  if (billed === null && upstream.ok) {
+    console.log(JSON.stringify({ reason: "llm_cost_missing", path, model: built.body.model }));
+  }
+  // An error answer without usage was not billed.
+  await settle(billed ?? (upstream.ok ? toUsd(hold) : 0));
 
   if (!upstream.ok) {
     const message = typeof payload?.error?.message === "string" ? payload.error.message.slice(0, 500) : "";
@@ -246,10 +314,5 @@ export async function handleLlm(req, env, { path, json, refuse }) {
     return json(failure(message || `llm provider error ${upstream.status}`, "upstream_error"), upstream.status);
   }
   if (!payload) return json(failure("llm provider sent an unreadable answer", "server_error"), 502);
-
-  const cost = costOf(payload.usage);
-  if (cost.estimated) console.log(JSON.stringify({ reason: "llm_cost_missing", path, model: built.body.model }));
-  await meter(env, tokenHash, "charge", { micros: toMicros(cost.usd), expiresAt: record.expiresAt });
-
   return json(payload);
 }

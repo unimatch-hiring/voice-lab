@@ -219,7 +219,8 @@ async function listInterviewKeys(env, json) {
         issuedAt: stored.issuedAt ?? 0,
         expiresAt: stored.expiresAt ?? 0,
         budgetUsd: budgetUsdOf(stored),
-        spentUsd: await spentUsd(env, id),
+        // One meter failing must not take the whole list down with it.
+        spentUsd: await spentUsd(env, id).catch(() => undefined),
       };
     }),
   );
@@ -302,7 +303,7 @@ export default {
     }
 
     if (LLM_PATHS.includes(path)) {
-      return handleLlm(req, env, { path, json, refuse: (reason) => logRefusal(reason, req, path) });
+      return handleLlm(req, env, ctx, { path, json, refuse: (reason) => logRefusal(reason, req, path) });
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);

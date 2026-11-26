@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "./index.js";
-import { DEFAULT_MAX_TOKENS, LlmBudget, MAX_BUDGET_USD } from "./llm.js";
+import { DEFAULT_MAX_TOKENS, LlmBudget, MAX_BODY_BYTES, MAX_BUDGET_USD } from "./llm.js";
 
 const ORIGIN = "http://localhost:5173";
 const OPENROUTER_KEY = "sk-or-v1-test-secret-not-real";
@@ -83,10 +83,11 @@ const ask = (over = {}) => ({
 });
 
 /** OpenRouter double: answers every call with the given body, records what it was sent. */
-function stubOpenRouter({ cost = 0.001, status = 200, body } = {}) {
+function stubOpenRouter({ cost = 0.001, status = 200, body, delayMs = 0 } = {}) {
   const calls = [];
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     calls.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) });
+    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
     const answer = body ?? {
       id: "gen-1",
       choices: [{ message: { role: "assistant", content: "safe" } }],
@@ -133,6 +134,14 @@ describe("who may use the LLM proxy", () => {
   it("rejects a key that is not in KV without calling OpenRouter", async () => {
     const { spy } = stubOpenRouter();
     const r = await worker.fetch(llm(ask(), { token: "vibe_revoked" }), env());
+    expect(r.status).toBe(401);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a key past its expiry that KV has not dropped yet", async () => {
+    const { spy } = stubOpenRouter();
+    const e = env({ KEYS: fakeKv({ [`key:${KEY}`]: record({ expiresAt: Date.now() - 1000 }) }) });
+    const r = await worker.fetch(llm(ask()), e);
     expect(r.status).toBe(401);
     expect(spy).not.toHaveBeenCalled();
   });
@@ -202,6 +211,40 @@ describe("what a call may ask for", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["an image", { type: "image_url", image_url: { url: "https://example.test/a.png", detail: "high" } }],
+    ["audio", { type: "input_audio", input_audio: { data: "AAAA", format: "wav" } }],
+    ["a file", { type: "file", file: { filename: "a.pdf", file_data: "data:application/pdf;base64,AAAA" } }],
+  ])("refuses %s in a message, which its byte count does not price", async (_, part) => {
+    const { spy } = stubOpenRouter();
+    const content = [{ type: "text", text: "look" }, part];
+    const r = await worker.fetch(llm(ask({ messages: [{ role: "user", content }] })), env());
+    expect(r.status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("passes text parts through", async () => {
+    const { calls } = stubOpenRouter();
+    const content = [{ type: "text", text: "Is this alarming?" }];
+    await worker.fetch(llm(ask({ messages: [{ role: "user", content }] })), env());
+    expect(calls[0].body.messages[0].content).toEqual(content);
+  });
+
+  it("refuses tools other than functions", async () => {
+    const { spy } = stubOpenRouter();
+    const r = await worker.fetch(llm(ask({ tools: [{ type: "web_search" }] })), env());
+    expect(r.status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a body over the size cap", async () => {
+    const { spy } = stubOpenRouter();
+    const huge = "x".repeat(MAX_BODY_BYTES);
+    const r = await worker.fetch(llm(ask({ messages: [{ role: "user", content: huge }] })), env());
+    expect(r.status).toBe(413);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("drops fields that would route around the list or bill extra", async () => {
     const { calls } = stubOpenRouter();
     await worker.fetch(
@@ -237,8 +280,8 @@ describe("the budget per key", () => {
   });
 
   it("honours a smaller budget set when the key was issued", async () => {
-    stubOpenRouter({ cost: 0.02 });
-    const e = env({ KEYS: fakeKv({ [`key:${KEY}`]: record({ budgetUsd: 0.01 }) }) });
+    stubOpenRouter({ cost: 0.05 });
+    const e = env({ KEYS: fakeKv({ [`key:${KEY}`]: record({ budgetUsd: 0.05 }) }) });
     expect((await worker.fetch(llm(ask()), e)).status).toBe(200);
     expect((await worker.fetch(llm(ask()), e)).status).toBe(402);
   });
@@ -255,6 +298,37 @@ describe("the budget per key", () => {
     const e = env();
     await Promise.all(Array.from({ length: 10 }, () => worker.fetch(llm(ask()), e)));
     expect(await spentOf(e)).toBe(1_000_000);
+  });
+
+  it("does not let slow parallel calls overspend the budget together", async () => {
+    // ~40 kB of prompt reserves ~$0.41 a call; each is billed $0.30, under its reservation.
+    stubOpenRouter({ cost: 0.3, delayMs: 50 });
+    const e = env();
+    const prompt = ask({ messages: [{ role: "user", content: "a".repeat(40_000) }] });
+    const answers = await Promise.all(Array.from({ length: 30 }, () => worker.fetch(llm(prompt), e)));
+    const statuses = answers.map((r) => r.status);
+
+    expect(statuses).toContain(402);
+    expect(await spentOf(e)).toBeLessThanOrEqual(MAX_BUDGET_USD * 1_000_000);
+  });
+
+  it("takes the reservation before the call, so hanging up does not dodge the charge", async () => {
+    let release;
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise((resolve) => (release = resolve)));
+    const e = env();
+    const pending = worker.fetch(llm(ask()), e);
+    await vi.waitFor(() => expect(release).toBeDefined());
+
+    expect(await spentOf(e)).toBeGreaterThan(0);
+    release(new Response(JSON.stringify({ choices: [], usage: { cost: 0 } })));
+    await pending;
+  });
+
+  it("gives the reservation back when OpenRouter answers with an error", async () => {
+    stubOpenRouter({ status: 400, body: { error: { message: "context too long" } } });
+    const e = env();
+    await worker.fetch(llm(ask()), e);
+    expect(await spentOf(e)).toBe(0);
   });
 
   it("still charges a call whose answer carries no cost", async () => {
@@ -347,6 +421,13 @@ describe("spending in the admin list", () => {
     ).json();
     expect([plain.budgetUsd, small.budgetUsd]).toEqual([5, 1]);
     expect(JSON.parse(e.KEYS.store.get(`key:${small.token}`)).budgetUsd).toBe(1);
+  });
+
+  it("still lists the keys when one meter cannot be read", async () => {
+    const e = await adminEnv(env({ LLM_BUDGET: { idFromName: (n) => n, get: () => ({ fetch: async () => { throw new Error("down"); } }) } }));
+    const r = await worker.fetch(admin("/admin/keys"), e);
+    expect(r.status).toBe(200);
+    expect((await r.json()).keys[0].spentUsd).toBeUndefined();
   });
 
   it("refuses to issue a key with a budget above the ceiling", async () => {
