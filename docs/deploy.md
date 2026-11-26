@@ -23,9 +23,13 @@ Needs two repository secrets:
   zones, no billing.
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `ADMIN_TOKEN`) are bound to the
+The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `OPENROUTER_API_KEY`, `ADMIN_TOKEN`) are bound to the
 Worker with `wrangler secret put` and are untouched by a deploy, so they never pass through
 CI. `AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
+
+A Worker deployed without `OPENROUTER_API_KEY` runs as before; only the LLM proxy answers
+`503`. Put the secret before telling a candidate about the proxy. The proxy's spend meter is
+a Durable Object class (`LlmBudget`, migration `v2`), created by the deploy itself.
 
 ## Interview keys
 

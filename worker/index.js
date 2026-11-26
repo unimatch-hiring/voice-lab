@@ -3,8 +3,10 @@ import {
   clientIp, withinLimit, sha256,
 } from "./signin.js";
 import { guard } from "./guard.js";
+import { LLM_PATHS, MAX_BUDGET_USD, budgetUsdOf, handleLlm, parseBudget, spentUsd } from "./llm.js";
 
 export { AddressGuard } from "./guard.js";
+export { LlmBudget } from "./llm.js";
 
 /**
  * ALLOWED_ORIGINS is a comma-separated list in an environment variable, e.g.:
@@ -16,7 +18,7 @@ export { AddressGuard } from "./guard.js";
  * We echo the request Origin back instead of writing `*`, so `Vary: Origin` is
  * mandatory: without it a CDN can serve a cached header to a different origin.
  */
-const CANDIDATE_PATHS = ["/engine", "/agent/token", "/deepgram-token"];
+const CANDIDATE_PATHS = ["/engine", "/agent/token", "/deepgram-token", ...LLM_PATHS];
 
 const originList = (value) => (value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -57,7 +59,7 @@ function corsHeaders(req, env) {
 
   return {
     "access-control-allow-origin": origin,
-    "access-control-allow-headers": "content-type,x-vibe-token,x-admin-token,x-admin-session",
+    "access-control-allow-headers": "content-type,authorization,x-vibe-token,x-admin-token,x-admin-session",
     "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "access-control-max-age": "86400", // a day: no preflight on every request
     vary: "Origin",
@@ -148,6 +150,8 @@ async function issueInterviewKey(req, env, json, who) {
   if (!(hours > 0) || hours > MAX_TTL_HOURS) {
     return json({ error: `hours must be between 0 and ${MAX_TTL_HOURS}` }, 400);
   }
+  const budgetUsd = parseBudget(body.budgetUsd);
+  if (budgetUsd === null) return json({ error: `budgetUsd must be above 0 and at most ${MAX_BUDGET_USD}` }, 400);
   // Counted exactly, per person: Cloudflare's limiter has no window longer than a minute.
   if (!(await guard(env, who, "mint")).ok) return json({ error: "too many keys this hour" }, 429);
 
@@ -159,7 +163,7 @@ async function issueInterviewKey(req, env, json, who) {
   // what expiresAt has to describe. Otherwise the page calls a key expired while the
   // Worker still honours it.
   const ttlSeconds = Math.max(MIN_TTL_SECONDS, Math.round(hours * 3600));
-  const record = { label, engine, issuedAt, expiresAt: issuedAt + ttlSeconds * 1000 };
+  const record = { label, engine, budgetUsd, issuedAt, expiresAt: issuedAt + ttlSeconds * 1000 };
 
   await env.KEYS.put(`key:${token}`, JSON.stringify(record), { expirationTtl: ttlSeconds });
 
@@ -206,13 +210,16 @@ async function listInterviewKeys(env, json) {
       // version, or a hand-made KV entry, otherwise reaches the page without expiresAt and
       // renders as "NaNm left".
       const token = name.slice("key:".length);
+      const id = await sha256(token);
       return {
-        id: await sha256(token),
+        id,
         hint: keyHint(token),
         label: stored.label ?? "",
         engine: engineOf(stored.engine),
         issuedAt: stored.issuedAt ?? 0,
         expiresAt: stored.expiresAt ?? 0,
+        budgetUsd: budgetUsdOf(stored),
+        spentUsd: await spentUsd(env, id),
       };
     }),
   );
@@ -292,6 +299,10 @@ export default {
         if (req.method === "DELETE") return revokeKey(id, env, json);
         return json({ error: "method not allowed" }, 405);
       }
+    }
+
+    if (LLM_PATHS.includes(path)) {
+      return handleLlm(req, env, { path, json, refuse: (reason) => logRefusal(reason, req, path) });
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);

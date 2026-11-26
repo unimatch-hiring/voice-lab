@@ -25,6 +25,11 @@ ALLOWED_ORIGINS = "https://unimatch-hiring.github.io,http://localhost:5173,http:
 # Pages so they share no storage with the admin page. They reach the candidate's
 # endpoints only, never /admin/.
 PREVIEW_ORIGINS = "https://unimatch-screening.github.io"
+# Models the LLM proxy (/llm/v1/) forwards to OpenRouter: cheap text models for task E's
+# phrase classifier. Anything else is 400. Editing the list is a deploy, not a code change.
+LLM_MODELS = "openai/gpt-4o-mini,openai/gpt-4.1-mini,openai/gpt-4.1-nano,openai/gpt-5-nano,google/gemini-2.5-flash-lite,google/gemini-2.5-flash,meta-llama/llama-3.3-70b-instruct,mistralai/mistral-small-3.2-24b-instruct,qwen/qwen3-30b-a3b-instruct-2507"
+# Ceiling on max_tokens per call; with it one call costs at most a fraction of a cent.
+LLM_MAX_TOKENS = "1024"
 
 # Interview keys, one entry per issued key, expiring by KV's own TTL so nothing has
 # to sweep them. Every caller holds one of these; there is no permanent token.
@@ -83,6 +88,15 @@ namespace_id = "4284"
 limit = 30
 period = 60
 
+# The LLM proxy: a classifier fires a call per phrase, so it gets more room than token
+# minting. The dollar budget per key is the real cap; this only slows a runaway loop.
+[[ratelimits]]
+name = "LLM_LIMIT"
+namespace_id = "4285"
+[ratelimits.simple]
+limit = 120
+period = 60
+
 # One object per admin address: the live code, its tries, the daily ceiling and the alert
 # window, counted atomically — see guard.js.
 [[durable_objects.bindings]]
@@ -92,3 +106,13 @@ class_name = "AddressGuard"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AddressGuard"]
+
+# One object per interview key: dollars spent through the LLM proxy, charged atomically
+# and dropped when the key expires — see llm.js.
+[[durable_objects.bindings]]
+name = "LLM_BUDGET"
+class_name = "LlmBudget"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["LlmBudget"]
