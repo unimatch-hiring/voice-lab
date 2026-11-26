@@ -82,6 +82,68 @@ describe("flag reporter", () => {
     );
   });
 
+  it("takes the agent's answer when it arrives as one message", () => {
+    const { bus, api } = harness();
+
+    childSays(bus, "Мне холодно");
+    bus.emit({ type: "agent-reply", text: "Укройся пледом.", at: 0 });
+    bus.emit({ type: "turn-start", at: 0 });
+
+    expect(api.reviewFlag).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Мне холодно", agentReply: "Укройся пледом." }),
+    );
+  });
+
+  it("never gives one message the answer to another", () => {
+    const { bus, api, stop } = harness();
+
+    childSays(bus, "Привет");
+    agentSays(bus, "Привет!");
+    childSays(bus, "Мне страшно");
+    stop();
+
+    expect(api.reviewFlag).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: "Мне страшно", agentReply: undefined }),
+    );
+  });
+
+  it("sends each message exactly once", () => {
+    const { bus, api, stop } = harness();
+
+    childSays(bus, "раз");
+    agentSays(bus, "один");
+    bus.emit({ type: "turn-start", at: 0 });
+    childSays(bus, "два");
+    agentSays(bus, "два");
+    stop();
+
+    expect(api.reviewFlag.mock.calls.map(([c]) => c.text)).toEqual(["раз", "два"]);
+  });
+
+  it("keeps sending after a review request fails", async () => {
+    const { bus, api } = harness();
+    api.reviewFlag.mockRejectedValueOnce(new Error("server down"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    childSays(bus, "раз");
+    agentSays(bus, "один");
+    childSays(bus, "два");
+    agentSays(bus, "два");
+    await Promise.resolve();
+
+    expect(api.reviewFlag).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it("does not send silence for review", () => {
+    const { bus, api } = harness();
+
+    childSays(bus, "...");
+    agentSays(bus, "Ты ещё здесь?");
+
+    expect(api.reviewFlag).not.toHaveBeenCalled();
+  });
+
   it("stops listening once the conversation is over", () => {
     const { bus, api, stop } = harness();
 

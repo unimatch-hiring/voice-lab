@@ -35,7 +35,8 @@ describe("OpenAI classifier", () => {
     expect(init.headers.authorization).toBe("Bearer sk-test");
     expect(body.model).toBe("gpt-test");
     expect(body.messages[1].content).toContain(CANDIDATE.text);
-    expect(body.messages[1].content).toContain("Как прошёл твой день?");
+    expect(JSON.parse(body.messages[1].content).earlier_lines_for_context_only).toEqual(CANDIDATE.context);
+    expect(body.messages[0].content).toMatch(/judge only child_message/i);
     expect(body.messages[1].content).toContain(CANDIDATE.agentReply);
     expect(body.messages[1].content).toContain("дядя Вася");
     expect(body.response_format.json_schema.strict).toBe(true);
@@ -71,6 +72,46 @@ describe("OpenAI classifier", () => {
     });
 
     await expect(classifier.classify(CANDIDATE)).rejects.toThrow(/unexpected shape/);
+  });
+
+  it("never hands back a concern labelled none", async () => {
+    const classifier = createOpenAiClassifier({
+      apiKey: "sk-test",
+      model: "gpt-test",
+      fetchImpl: answering({ ...VERDICT, category: "none", severity: "none" }),
+    });
+
+    expect(await classifier.classify(CANDIDATE)).toMatchObject({
+      concern: true,
+      category: "other",
+      severity: "medium",
+    });
+  });
+
+  it.each([
+    ["a refusal", { choices: [{ message: { content: null, refusal: "I can't help" } }] }, /can't help/],
+    ["no answer at all", { choices: [] }, /no verdict/],
+    ["text that is not JSON", { choices: [{ message: { content: "concern: yes" } }] }, /JSON/],
+  ])("throws on %s instead of guessing", async (_, body, error) => {
+    const classifier = createOpenAiClassifier({
+      apiKey: "sk-test",
+      model: "gpt-test",
+      fetchImpl: async () => new Response(JSON.stringify(body)),
+    });
+
+    await expect(classifier.classify(CANDIDATE)).rejects.toThrow(error);
+  });
+
+  it("throws when the network fails", async () => {
+    const classifier = createOpenAiClassifier({
+      apiKey: "sk-test",
+      model: "gpt-test",
+      fetchImpl: async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      },
+    });
+
+    await expect(classifier.classify(CANDIDATE)).rejects.toThrow(/timed out/);
   });
 
   it("does not call OpenAI without a key", async () => {

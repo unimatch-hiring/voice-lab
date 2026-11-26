@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "server": "node --env-file-if-exists=server/.env server/index.js"
+    "server": "node --env-file-if-exists=server/.env server/index.js",
+    "eval:flags": "RUN_LLM_EVAL=1 node --env-file-if-exists=server/.env node_modules/vitest/vitest.mjs run server/flagReview.eval.test.js"
   },
   "dependencies": {
     "@elevenlabs/client": "^1.17.0",

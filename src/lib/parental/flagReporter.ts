@@ -40,7 +40,8 @@ export function watchForFlags(bus: EventBus, api: Pick<ParentApi, "reviewFlag">)
     if (reply.trim()) remember({ role: "assistant", text: reply.trim() });
     reply = "";
 
-    pending = { text: e.result.text, context: [...recent] };
+    // Silence comes through as "..."; there is nothing to review in it.
+    if (/\p{L}/u.test(e.result.text)) pending = { text: e.result.text, context: [...recent] };
     remember({ role: "child", text: e.result.text });
   });
 

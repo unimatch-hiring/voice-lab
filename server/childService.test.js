@@ -135,6 +135,38 @@ describe("alarm flags", () => {
     expect(classifier.classify).toHaveBeenCalledWith({ ...CANDIDATE, parentConcerns: "дядя Вася" });
   });
 
+  it("keeps every flag when two reviews finish at once", async () => {
+    classifier.classify.mockResolvedValue(CONCERN);
+    const service = serviceOn(file);
+
+    await Promise.all([
+      service.reviewFlag({ ...CANDIDATE, text: "first" }),
+      service.reviewFlag({ ...CANDIDATE, text: "second" }),
+    ]);
+
+    expect((await service.listFlags()).map((f) => f.text).sort()).toEqual(["first", "second"]);
+  });
+
+  it("stores nothing but the review's verdict, without internal fields", async () => {
+    classifier.classify.mockResolvedValue(CONCERN);
+
+    const { flag } = await serviceOn(file).reviewFlag(CANDIDATE);
+
+    expect(flag).not.toHaveProperty("concern");
+    expect(flag).not.toHaveProperty("parentConcerns");
+  });
+
+  it.each([
+    ["too many context lines", { context: Array(4).fill({ role: "child", text: "x" }) }],
+    ["a context line with an unknown role", { context: [{ role: "parent", text: "x" }] }],
+    ["an empty agent reply", { agentReply: "" }],
+  ])("refuses %s without reviewing it", async (_, patch) => {
+    await expect(serviceOn(file).reviewFlag({ ...CANDIDATE, ...patch })).rejects.toThrow(
+      ValidationError,
+    );
+    expect(classifier.classify).not.toHaveBeenCalled();
+  });
+
   it("refuses a candidate without the child's message", async () => {
     await expect(serviceOn(file).reviewFlag({ ...CANDIDATE, text: "" })).rejects.toThrow(
       ValidationError,

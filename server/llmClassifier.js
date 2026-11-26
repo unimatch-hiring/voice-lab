@@ -10,8 +10,12 @@ Every message the child says reaches you; most are harmless (games, films,
 jokes, figures of speech). Decide whether the child may actually be at risk or in distress:
 self-harm, abuse, neglect (left alone, hungry, cold), violence against or by the child, sexual
 content, bullying, or other danger. Take the parent's concerns into account when given.
-Use the recent conversation and the assistant's reply to judge the context. When unsure, prefer flagging a real risk
-over missing one. When concern is true, category and severity are never "none".
+Judge only child_message, the latest thing the child said. Earlier lines were reviewed when
+they were said: use them only to understand what child_message means, never as a reason to
+flag it. A message that is harmless on its own ("we played football", "yes, I'm here", "it's
+fine, they came back") is not a concern, whatever was said before it. When unsure about
+child_message itself, prefer flagging a real risk over missing one. When concern is true,
+category and severity are never "none".
 Write the reason in one short sentence, in the language of the message.`;
 
 const VERDICT_SCHEMA = {
@@ -47,7 +51,7 @@ export function createOpenAiClassifier({ apiKey, model, baseUrl = OPENAI_BASE_UR
               role: "user",
               content: JSON.stringify({
                 child_message: text,
-                recent_conversation: context,
+                earlier_lines_for_context_only: context,
                 assistant_reply: agentReply ?? null,
                 parent_concerns: parentConcerns || null,
               }),
@@ -77,5 +81,15 @@ function parseVerdict(v) {
   ) {
     throw new Error("OpenAI verdict has an unexpected shape");
   }
-  return { concern: v.concern, category: v.category, severity: v.severity, reason: v.reason };
+  // The schema cannot tie category to concern, and models do answer "concern, category none":
+  // the parent must never see a flag labelled "none · none".
+  if (v.concern) {
+    return {
+      concern: true,
+      category: v.category === "none" ? "other" : v.category,
+      severity: v.severity === "none" ? "medium" : v.severity,
+      reason: v.reason,
+    };
+  }
+  return { concern: false, category: v.category, severity: v.severity, reason: v.reason };
 }

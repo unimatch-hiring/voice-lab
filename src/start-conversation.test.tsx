@@ -123,6 +123,25 @@ test("without the parent's settings no conversation starts", async () => {
   expect(created).toHaveLength(0);
 });
 
+test("a second conversation does not send each message twice", async () => {
+  render(<App />);
+  const button = await startButton();
+  fireEvent.click(button);
+  await waitFor(() => expect(created).toHaveLength(1));
+  await act(async () => created[0].finishStart());
+  fireEvent.click(await screen.findByRole("button", { name: /end conversation/i }));
+  fireEvent.click(await startButton());
+  await waitFor(() => expect(created).toHaveLength(2));
+  await act(async () => created[1].finishStart());
+  parent.reviewFlag.mockClear();
+
+  created[1].deps.bus.emit({ type: "stt-result", result: { text: "Мне страшно", words: [] } });
+  created[1].deps.bus.emit({ type: "agent-reply", text: "Я рядом.", at: 0 });
+  created[1].deps.bus.emit({ type: "turn-start", at: 0 });
+
+  expect(parent.reviewFlag).toHaveBeenCalledOnce();
+});
+
 test("every child message during the conversation is sent for review", async () => {
   parent.getSettings.mockResolvedValue(EMPTY_SETTINGS);
   render(<App />);

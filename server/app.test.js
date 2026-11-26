@@ -72,6 +72,24 @@ describe("parental HTTP API", () => {
     expect(service.reviewFlag).toHaveBeenCalledWith(candidate);
   });
 
+  it("answers 400 to a flag candidate the service refuses", async () => {
+    service.reviewFlag.mockRejectedValue(new ValidationError("text must be a non-empty string"));
+
+    const r = await fetch(`${base}/api/flags/review`, { method: "POST", body: "{}" });
+
+    expect(r.status).toBe(400);
+  });
+
+  it("answers 500, not a verdict, when the service breaks", async () => {
+    service.reviewFlag.mockRejectedValue(new Error("disk full"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const r = await fetch(`${base}/api/flags/review`, { method: "POST", body: "{}" });
+
+    expect(r.status).toBe(500);
+    expect(await r.json()).toEqual({ error: "internal error" });
+  });
+
   it("lists the stored flags", async () => {
     service.listFlags.mockResolvedValue([{ id: "1" }]);
 

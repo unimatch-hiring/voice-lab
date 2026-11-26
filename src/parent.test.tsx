@@ -64,6 +64,7 @@ describe("parent page", () => {
         reason: "Talks about being hit at home.",
         text: "Papa hits me when mum is at work",
         context: [{ role: "assistant", text: "How was your day?" }],
+        agentReply: "I'm sorry. Are you safe now?",
       },
       {
         id: "2",
@@ -80,6 +81,8 @@ describe("parent page", () => {
     expect(screen.getByText("How was your day?")).toBeTruthy();
     expect(screen.getByText("I want to die in this game")).toBeTruthy();
     expect(screen.getByText(/not verified/i)).toBeTruthy();
+    expect(screen.getByText("abuse · high")).toBeTruthy();
+    expect(screen.getByText(/assistant answered: i'm sorry\. are you safe now\?/i)).toBeTruthy();
   });
 
   it("deletes nothing when the parent cancels the confirmation", async () => {
@@ -106,6 +109,12 @@ describe("parent page", () => {
     expect(api.deleteChildData).toHaveBeenCalledOnce();
     expect((screen.getByLabelText(/about the child/i) as HTMLTextAreaElement).value).toBe("");
     expect((screen.getByLabelText(/must not discuss/i) as HTMLTextAreaElement).value).toBe("horror films");
+  });
+
+  it("says so when there is nothing worrying yet", async () => {
+    render(<Parent api={fakeApi()} />);
+
+    expect(await screen.findByText(/nothing worrying so far/i)).toBeTruthy();
   });
 
   it("says so when the server is down instead of showing an empty form", async () => {
