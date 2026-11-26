@@ -10,6 +10,7 @@ export default defineConfig({
   // repo. Without this the suite collects those too and reports failures nobody wrote.
   test: {
     environment: "jsdom",
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.claude/**"],
+    // The standalone history server runs its own node:test suite.
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.claude/**", "server/**"],
   },
 });

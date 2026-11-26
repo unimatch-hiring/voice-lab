@@ -1,6 +1,6 @@
 # Deploy
 
-Two independent pieces.
+The frontend, voice Worker, and history API start independently.
 
 ## Frontend — GitHub Pages
 
@@ -26,6 +26,16 @@ Needs two repository secrets:
 The provider keys (`ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `ADMIN_TOKEN`) are bound to the
 Worker with `wrangler secret put` and are untouched by a deploy, so they never pass through
 CI. `AGENT_ID` is plain `[vars]` — a session token is still required, so it is not a secret.
+
+## History API
+
+When the frontend is opened on localhost or 127.0.0.1, it defaults to
+`http://127.0.0.1:8788`. For a hosted site, supply `VITE_HISTORY_URL` when building
+the frontend. The current Pages and preview workflows do not pass a history URL to
+Vite. Those builds tell the speaker that history is unavailable before a conversation starts.
+
+On the API host, set `HISTORY_DATA_DIR` to a persistent directory and add the
+frontend origin to `HISTORY_ALLOWED_ORIGINS`. See the [server guide](../server/README.md).
 
 ## Interview keys
 
