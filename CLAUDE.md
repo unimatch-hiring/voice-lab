@@ -42,6 +42,31 @@ Read the doc for the area you are touching before you touch it.
 | [docs/mouth.md](docs/mouth.md) | lip sync: amplitude source, invariants, sprites |
 | [docs/deploy.md](docs/deploy.md) | Pages, Worker, secrets |
 
+## Parental control: what to know before touching it
+
+How it works for a reader: [README](./README.md#parental-control). What bites:
+
+- **The child's prompt is built on every start** (`buildChildPrompt`, called in
+  `App.tsx` `toggleConversation`) and travels in `SessionDeps.prompt` →
+  `AgentSession` → `elevenLabsClient.ts`, the only file that imports the SDK. No settings,
+  no start: that is a safety rule, not an error path to soften.
+- **Every child message goes to review**, sent by `flagReporter.ts` once the agent's answer
+  is in (`turn-start` or the next `stt-result`). Do not put a keyword filter back in front:
+  it missed distress said in plain words. Silence (`"..."`) is skipped.
+- **The review judges the latest message only.** The context is there to explain it; with it
+  treated as evidence, one alarm flagged every harmless line after it. The instruction lives
+  in `server/llmClassifier.js`.
+- **Changing the review instruction or the model means running `npm run eval:flags`** — the
+  offline tests fake the model and cannot tell a good instruction from a bad one. It needs
+  `server/.env` (gitignored; OpenRouter key, `typesafe/jev-router`).
+- **Harmless messages are not stored; a failed review is stored as `unverified`.** Both are
+  deliberate.
+- `server/` is plain Node with no dependencies: `jsonStore` (queued writes, temp + rename),
+  `childService` (the rules), `llmClassifier` (the only provider code), `app` (routes only),
+  `index` (wiring). The service sees nothing of the provider but `classify`.
+- **The server is local only.** It is not deployed; merging to `main` ships a site whose
+  conversation cannot start until the server is hosted somewhere and `/api` points at it.
+
 ## Non-negotiable
 
 Full reasoning in [conventions](docs/conventions.md). YOU MUST NOT trade any of these for
