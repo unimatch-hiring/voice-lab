@@ -4,7 +4,10 @@ import { Parent } from "./Parent";
 import type { ParentApi } from "./lib/parental/parentApi";
 import type { Flag, ParentSettings } from "./lib/parental/types";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const STORED: ParentSettings = {
   allowedTopics: "space",
@@ -19,6 +22,7 @@ function fakeApi(overrides: Partial<ParentApi> = {}): ParentApi {
     saveSettings: vi.fn(async (s: ParentSettings) => s),
     reviewFlag: vi.fn(async () => ({ flagged: false })),
     listFlags: vi.fn(async (): Promise<Flag[]> => []),
+    deleteChildData: vi.fn(async () => ({ deleted: true })),
     ...overrides,
   };
 }
@@ -77,6 +81,32 @@ describe("parent page", () => {
     expect(screen.getByText("How was your day?")).toBeTruthy();
     expect(screen.getByText("I want to die in this game")).toBeTruthy();
     expect(screen.getByText(/not verified/i)).toBeTruthy();
+  });
+
+  it("deletes nothing when the parent cancels the confirmation", async () => {
+    const api = fakeApi();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Parent api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete all data/i }));
+
+    expect(api.deleteChildData).not.toHaveBeenCalled();
+    expect((screen.getByLabelText(/about the child/i) as HTMLTextAreaElement).value).toBe("Masha, 7");
+  });
+
+  it("after confirmation clears the flags and the profile, keeps the topics", async () => {
+    const flag: Flag = { id: "1", at: 0, status: "unverified", text: "secret words", matched: ["secret"], context: [] };
+    const api = fakeApi({ listFlags: async () => [flag] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<Parent api={api} />);
+
+    expect(await screen.findByText("secret words")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /delete all data/i }));
+
+    await waitFor(() => expect(screen.queryByText("secret words")).toBeNull());
+    expect(api.deleteChildData).toHaveBeenCalledOnce();
+    expect((screen.getByLabelText(/about the child/i) as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText(/must not discuss/i) as HTMLTextAreaElement).value).toBe("horror films");
   });
 
   it("says so when the server is down instead of showing an empty form", async () => {

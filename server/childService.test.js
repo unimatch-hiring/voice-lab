@@ -98,6 +98,19 @@ describe("alarm flags", () => {
     expect((await service.listFlags()).map((f) => f.text)).toEqual(["second", "first"]);
   });
 
+  it("deleting the child's data clears flags and profile but keeps the parent's rules", async () => {
+    classifier.classify.mockResolvedValue(CONCERN);
+    const service = serviceOn(file);
+    await service.saveSettings(SETTINGS);
+    await service.reviewFlag(CANDIDATE);
+
+    await service.deleteChildData();
+
+    const fresh = serviceOn(file);
+    expect(await fresh.listFlags()).toEqual([]);
+    expect(await fresh.getSettings()).toEqual({ ...SETTINGS, childProfile: "" });
+  });
+
   it("refuses a candidate without the words that matched", async () => {
     await expect(serviceOn(file).reviewFlag({ ...CANDIDATE, matched: [] })).rejects.toThrow(
       ValidationError,

@@ -9,6 +9,7 @@ export function createApp(service) {
     "PUT /api/settings": async (req) => service.saveSettings(await readJson(req)),
     "POST /api/flags/review": async (req) => service.reviewFlag(await readJson(req)),
     "GET /api/flags": () => service.listFlags(),
+    "DELETE /api/child-data": () => service.deleteChildData(),
   };
 
   return async function handle(req, res) {

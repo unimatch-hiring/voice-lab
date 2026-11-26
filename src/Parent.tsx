@@ -27,6 +27,11 @@ const FIELDS: { key: keyof ParentSettings; label: string; placeholder: string }[
   },
 ];
 
+const DELETE_CONFIRMATION =
+  "Delete everything gathered about your child?\n\n" +
+  "Deleted: all alarm flags with the child's messages, and the \"About the child\" field.\n" +
+  "Kept: the allowed and blocked topics and your alarm words.\n\nThis cannot be undone.";
+
 const UNREACHABLE = "The parental server is not reachable. Start it with npm run server.";
 
 export function Parent({ api: injected }: { api?: ParentApi }) {
@@ -62,6 +67,18 @@ export function Parent({ api: injected }: { api?: ParentApi }) {
       setError(UNREACHABLE);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteChildData = async () => {
+    if (!settings || !window.confirm(DELETE_CONFIRMATION)) return;
+    setError(null);
+    try {
+      await api.deleteChildData();
+      setFlags([]);
+      setSettings({ ...settings, childProfile: "" });
+    } catch {
+      setError(UNREACHABLE);
     }
   };
 
@@ -123,6 +140,9 @@ export function Parent({ api: injected }: { api?: ParentApi }) {
             <span className="readout">Alarm flags</span>
           </div>
           <div className="panel-body">
+            <button className="parent-danger" type="button" onClick={deleteChildData}>
+              Delete all data about the child
+            </button>
             {flags.length === 0 ? (
               <p className="hint">Nothing worrying so far.</p>
             ) : (

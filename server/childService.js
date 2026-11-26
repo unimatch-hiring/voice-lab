@@ -51,6 +51,16 @@ export function createChildService(store, classifier) {
       return { flagged: true, flag: await saveFlag({ ...candidate, status: "confirmed", ...review }) };
     },
 
+    /** Everything gathered about the child; the parent's topics and alarm words stay. */
+    async deleteChildData() {
+      await store.update((doc) => ({
+        ...doc,
+        settings: { ...doc.settings, childProfile: "" },
+        flags: [],
+      }));
+      return { deleted: true };
+    },
+
     async listFlags() {
       return [...(await store.read()).flags].reverse();
     },

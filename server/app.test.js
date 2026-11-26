@@ -11,6 +11,7 @@ const service = {
   saveSettings: vi.fn(),
   reviewFlag: vi.fn(),
   listFlags: vi.fn(),
+  deleteChildData: vi.fn(),
 };
 
 beforeEach(async () => {
@@ -75,6 +76,14 @@ describe("parental HTTP API", () => {
     service.listFlags.mockResolvedValue([{ id: "1" }]);
 
     expect(await (await fetch(`${base}/api/flags`)).json()).toEqual([{ id: "1" }]);
+  });
+
+  it("deletes the child's data on DELETE only", async () => {
+    service.deleteChildData.mockResolvedValue({ deleted: true });
+
+    expect((await fetch(`${base}/api/child-data`, { method: "DELETE" })).status).toBe(200);
+    expect((await fetch(`${base}/api/child-data`)).status).toBe(404);
+    expect(service.deleteChildData).toHaveBeenCalledOnce();
   });
 
   it("answers 404 to anything else", async () => {

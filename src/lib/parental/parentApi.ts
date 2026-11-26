@@ -8,6 +8,7 @@ export interface ParentApi {
   saveSettings(settings: ParentSettings): Promise<ParentSettings>;
   reviewFlag(candidate: FlagCandidate): Promise<{ flagged: boolean }>;
   listFlags(): Promise<Flag[]>;
+  deleteChildData(): Promise<unknown>;
 }
 
 export class ParentApiError extends Error {
@@ -42,5 +43,6 @@ export function createParentApi(
     saveSettings: (settings) => request("PUT", "/settings", settings),
     reviewFlag: (candidate) => request("POST", "/flags/review", candidate),
     listFlags: () => request("GET", "/flags"),
+    deleteChildData: () => request("DELETE", "/child-data"),
   };
 }
