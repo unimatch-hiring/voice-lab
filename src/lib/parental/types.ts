@@ -18,11 +18,12 @@ export interface ContextLine {
   text: string;
 }
 
-/** A message that matched an alarm word, sent for review. Mirrors `parseCandidate` on the server. */
+/** A child message sent for review. Mirrors `parseCandidate` on the server. */
 export interface FlagCandidate {
   text: string;
-  matched: string[];
   context: ContextLine[];
+  /** What the agent answered to this message, when it answered. */
+  agentReply?: string;
 }
 
 /** Stored only when the review confirmed a concern, or could not run. */

@@ -27,7 +27,10 @@ vi.mock("./lib/pipeline/createSession", () => ({
 
 // The parental server is not under test here; a start always finds the parent's settings.
 vi.mock("./lib/parental/parentApi", () => ({
-  createParentApi: () => ({ getSettings: () => Promise.resolve(EMPTY_SETTINGS) }),
+  createParentApi: () => ({
+    getSettings: () => Promise.resolve(EMPTY_SETTINGS),
+    appendTranscript: () => Promise.resolve(),
+  }),
 }));
 
 beforeEach(() => {

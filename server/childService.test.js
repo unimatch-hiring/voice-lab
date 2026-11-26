@@ -55,10 +55,22 @@ describe("parent settings", () => {
 
 const CANDIDATE = {
   text: "Мне страшно идти домой, папа меня бьёт",
-  matched: ["меня бьет"],
   context: [{ role: "assistant", text: "Что ты будешь делать после школы?" }],
+  agentReply: "Мне очень жаль. Ты сейчас в безопасности?",
 };
 const CONCERN = { concern: true, category: "abuse", severity: "high", reason: "Говорит о побоях." };
+
+describe("conversation log", () => {
+  it("keeps every line in order across a restart", async () => {
+    await serviceOn(file).appendTranscript({ role: "child", text: "Мне холодно" });
+    await serviceOn(file).appendTranscript({ role: "assistant", text: "Укройся пледом" });
+
+    expect((await serviceOn(file).listTranscript()).map((l) => [l.role, l.text])).toEqual([
+      ["child", "Мне холодно"],
+      ["assistant", "Укройся пледом"],
+    ]);
+  });
+});
 
 describe("alarm flags", () => {
   it("keeps a confirmed concern with the child's full message and the context", async () => {
@@ -103,16 +115,28 @@ describe("alarm flags", () => {
     const service = serviceOn(file);
     await service.saveSettings(SETTINGS);
     await service.reviewFlag(CANDIDATE);
+    await service.appendTranscript({ role: "child", text: "Привет" });
 
     await service.deleteChildData();
 
     const fresh = serviceOn(file);
     expect(await fresh.listFlags()).toEqual([]);
+    expect(await fresh.listTranscript()).toEqual([]);
     expect(await fresh.getSettings()).toEqual({ ...SETTINGS, childProfile: "" });
   });
 
-  it("refuses a candidate without the words that matched", async () => {
-    await expect(serviceOn(file).reviewFlag({ ...CANDIDATE, matched: [] })).rejects.toThrow(
+  it("hands the parent's concerns to the review", async () => {
+    classifier.classify.mockResolvedValue({ ...CONCERN, concern: false });
+    const service = serviceOn(file);
+    await service.saveSettings({ ...SETTINGS, triggerWords: "дядя Вася" });
+
+    await service.reviewFlag(CANDIDATE);
+
+    expect(classifier.classify).toHaveBeenCalledWith({ ...CANDIDATE, parentConcerns: "дядя Вася" });
+  });
+
+  it("refuses a candidate without the child's message", async () => {
+    await expect(serviceOn(file).reviewFlag({ ...CANDIDATE, text: "" })).rejects.toThrow(
       ValidationError,
     );
     expect(classifier.classify).not.toHaveBeenCalled();

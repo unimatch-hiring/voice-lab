@@ -23,6 +23,7 @@ function fakeApi(overrides: Partial<ParentApi> = {}): ParentApi {
     reviewFlag: vi.fn(async () => ({ flagged: false })),
     listFlags: vi.fn(async (): Promise<Flag[]> => []),
     deleteChildData: vi.fn(async () => ({ deleted: true })),
+    appendTranscript: vi.fn(async () => ({ ok: true })),
     ...overrides,
   };
 }
@@ -41,7 +42,7 @@ describe("parent page", () => {
     const api = fakeApi();
     render(<Parent api={api} />);
 
-    fireEvent.change(await screen.findByLabelText(/alarm words/i), {
+    fireEvent.change(await screen.findByLabelText(/what worries you/i), {
       target: { value: "secret" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
@@ -62,7 +63,6 @@ describe("parent page", () => {
         severity: "high",
         reason: "Talks about being hit at home.",
         text: "Papa hits me when mum is at work",
-        matched: ["hits me"],
         context: [{ role: "assistant", text: "How was your day?" }],
       },
       {
@@ -70,7 +70,6 @@ describe("parent page", () => {
         at: 0,
         status: "unverified",
         text: "I want to die in this game",
-        matched: ["want to die"],
         context: [],
       },
     ];
@@ -95,7 +94,7 @@ describe("parent page", () => {
   });
 
   it("after confirmation clears the flags and the profile, keeps the topics", async () => {
-    const flag: Flag = { id: "1", at: 0, status: "unverified", text: "secret words", matched: ["secret"], context: [] };
+    const flag: Flag = { id: "1", at: 0, status: "unverified", text: "secret words", context: [] };
     const api = fakeApi({ listFlags: async () => [flag] });
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<Parent api={api} />);

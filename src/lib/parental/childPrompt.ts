@@ -1,4 +1,3 @@
-import { AGENT_ALARM_PHRASES } from "./triggers";
 import type { ParentSettings } from "./types";
 
 const CHILD_ROLE = `You are a friendly voice companion talking with a child.
@@ -8,12 +7,7 @@ their address, school, phone number or passwords. If the child sounds scared, hu
 danger, answer with care and encourage them to talk to a parent or another trusted adult.
 
 Speak the language the child speaks to you in, and keep replies to one or two sentences:
-they are spoken aloud, not read.
-
-If anything the child says suggests they may be unsafe, hurt, scared, hungry, left alone,
-neglected or in distress — even without obvious words — begin your reply with exactly this
-sentence, word for word: "${AGENT_ALARM_PHRASES[0]}" (when speaking English:
-"${AGENT_ALARM_PHRASES[1]}"). Never use that sentence otherwise.`;
+they are spoken aloud, not read.`;
 
 /** The agent's role for one conversation, built from what the parent wrote. */
 export function buildChildPrompt(settings: ParentSettings): string {

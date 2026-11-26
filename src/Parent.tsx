@@ -22,15 +22,15 @@ const FIELDS: { key: keyof ParentSettings; label: string; placeholder: string }[
   },
   {
     key: "triggerWords",
-    label: "Extra alarm words",
-    placeholder: "Words that should raise a flag, one per line or separated by commas",
+    label: "What worries you",
+    placeholder: "Anything the review of your child's messages should watch for in particular",
   },
 ];
 
 const DELETE_CONFIRMATION =
   "Delete everything gathered about your child?\n\n" +
-  "Deleted: all alarm flags with the child's messages, and the \"About the child\" field.\n" +
-  "Kept: the allowed and blocked topics and your alarm words.\n\nThis cannot be undone.";
+  "Deleted: the conversation log, all alarm flags with the child's messages, and the \"About the child\" field.\n" +
+  "Kept: the allowed and blocked topics and what worries you.\n\nThis cannot be undone.";
 
 const UNREACHABLE = "The parental server is not reachable. Start it with npm run server.";
 
@@ -172,7 +172,7 @@ function FlagItem({ flag }: { flag: Flag }) {
       </div>
       {flag.reason && <p className="parent-flag-reason">{flag.reason}</p>}
       <blockquote>{flag.text}</blockquote>
-      <p className="hint">Matched: {flag.matched.join(", ")}</p>
+      {flag.agentReply && <p className="hint">Assistant answered: {flag.agentReply}</p>}
       {flag.context.length > 0 && (
         <details>
           <summary>What was said before</summary>

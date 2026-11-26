@@ -8,6 +8,7 @@ const CONTEXT_ROLES = ["child", "assistant"];
 export const EMPTY_DOC = {
   settings: Object.fromEntries(SETTINGS_FIELDS.map((f) => [f, ""])),
   flags: [],
+  transcript: [],
 };
 
 /** The request was understood but its content is not acceptable: a 400, not a 500. */
@@ -33,19 +34,21 @@ export function createChildService(store, classifier) {
     },
 
     /**
-     * A keyword match is only a candidate; the classifier decides. When it cannot, the
-     * flag is kept as unverified: a missed risk costs more than a false alarm.
+     * Every child message comes here; the classifier decides. When it cannot, the flag is
+     * kept as unverified: a missed risk costs more than a false alarm.
      */
     async reviewFlag(input) {
       const candidate = parseCandidate(input);
+      const parentConcerns = (await store.read()).settings.triggerWords;
       let verdict;
       try {
-        verdict = await classifier.classify(candidate);
+        verdict = await classifier.classify({ ...candidate, parentConcerns });
       } catch (e) {
-        console.warn("flag review failed, keeping it unverified:", e.message);
+        console.warn("flag review failed, keeping it unverified:", e.message, candidate.text);
         return { flagged: true, flag: await saveFlag({ ...candidate, status: "unverified" }) };
       }
       // Not stored: the child's words are kept only when there is a reason to.
+      console.info("flag review:", verdict.concern ? "CONCERN" : "harmless", verdict, candidate.text);
       const { concern, ...review } = verdict;
       if (!concern) return { flagged: false };
       return { flagged: true, flag: await saveFlag({ ...candidate, status: "confirmed", ...review }) };
@@ -57,8 +60,19 @@ export function createChildService(store, classifier) {
         ...doc,
         settings: { ...doc.settings, childProfile: "" },
         flags: [],
+        transcript: [],
       }));
       return { deleted: true };
+    },
+
+    async appendTranscript(input) {
+      const line = parseLine(input);
+      await store.update((doc) => ({ ...doc, transcript: [...doc.transcript, { at: Date.now(), ...line }] }));
+      return { ok: true };
+    },
+
+    async listTranscript() {
+      return (await store.read()).transcript;
     },
 
     async listFlags() {
@@ -80,11 +94,11 @@ function parseSettings(input) {
 }
 
 function parseCandidate(input) {
-  const { text, matched, context = [] } = input ?? {};
-  if (!isText(text)) throw new ValidationError("text must be a non-empty string");
-  if (!Array.isArray(matched) || matched.length === 0 || !matched.every(isText)) {
-    throw new ValidationError("matched must list the words that triggered the review");
+  const { text, context = [], agentReply } = input ?? {};
+  if (agentReply !== undefined && !isText(agentReply)) {
+    throw new ValidationError("agentReply must be a non-empty string when present");
   }
+  if (!isText(text)) throw new ValidationError("text must be a non-empty string");
   if (!Array.isArray(context) || context.length > MAX_CONTEXT_LINES) {
     throw new ValidationError(`context must hold at most ${MAX_CONTEXT_LINES} lines`);
   }
@@ -95,9 +109,17 @@ function parseCandidate(input) {
   }
   return {
     text,
-    matched,
     context: context.map(({ role, text }) => ({ role, text })),
+    ...(agentReply ? { agentReply } : {}),
   };
+}
+
+function parseLine(input) {
+  const { role, text } = input ?? {};
+  if (!CONTEXT_ROLES.includes(role) || !isText(text)) {
+    throw new ValidationError("a transcript line needs a role and a text");
+  }
+  return { role, text };
 }
 
 function isText(v) {

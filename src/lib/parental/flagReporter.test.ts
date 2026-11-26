@@ -5,100 +5,89 @@ import type { ParentApi } from "./parentApi";
 
 const childSays = (bus: EventBus, text: string) =>
   bus.emit({ type: "stt-result", result: { text, words: [] } });
+const agentSays = (bus: EventBus, ...tokens: string[]) => {
+  for (const token of tokens) bus.emit({ type: "llm-token", token, at: 0 });
+  bus.emit({ type: "turn-start", at: 0 });
+};
 
-function harness(extra: string[] = []) {
+function harness() {
   const bus = new EventBus();
-  const api = { reviewFlag: vi.fn<ParentApi["reviewFlag"]>(async () => ({ flagged: true })) };
-  const stop = watchForFlags(bus, api, extra);
+  const api = { reviewFlag: vi.fn<ParentApi["reviewFlag"]>(async () => ({ flagged: false })) };
+  const stop = watchForFlags(bus, api);
   return { bus, api, stop };
 }
 
 describe("flag reporter", () => {
-  it("sends the full message with the lines said before it", () => {
+  it("sends every child message, even one with no alarming word in it", () => {
+    const { bus, api } = harness();
+
+    childSays(bus, "Мамы второй день нет, я ем хлеб");
+    agentSays(bus, "А кто сейчас с тобой?");
+
+    expect(api.reviewFlag).toHaveBeenCalledWith({
+      text: "Мамы второй день нет, я ем хлеб",
+      context: [],
+      agentReply: "А кто сейчас с тобой?",
+    });
+  });
+
+  it("sends the lines before the message and the agent's answer to it", () => {
     const { bus, api } = harness();
 
     childSays(bus, "Привет");
-    bus.emit({ type: "llm-token", token: "Привет! ", at: 0 });
-    bus.emit({ type: "llm-token", token: "Как дела?", at: 0 });
-    childSays(bus, "Плохо, папа меня бьёт каждый вечер");
+    agentSays(bus, "Привет! ", "Как дела?");
+    childSays(bus, "Плохо");
+    agentSays(bus, "Что случилось?");
 
-    expect(api.reviewFlag).toHaveBeenCalledWith({
-      text: "Плохо, папа меня бьёт каждый вечер",
-      matched: ["бьет"],
+    expect(api.reviewFlag).toHaveBeenLastCalledWith({
+      text: "Плохо",
       context: [
         { role: "child", text: "Привет" },
         { role: "assistant", text: "Привет! Как дела?" },
       ],
+      agentReply: "Что случилось?",
     });
+  });
+
+  it("waits for the agent's answer before sending", () => {
+    const { bus, api } = harness();
+
+    childSays(bus, "Мне холодно");
+
+    expect(api.reviewFlag).not.toHaveBeenCalled();
   });
 
   it("keeps only the last three lines of context", () => {
     const { bus, api } = harness();
 
     for (const line of ["раз", "два", "три", "четыре"]) childSays(bus, line);
-    childSays(bus, "не хочу жить");
+    childSays(bus, "пять");
+    agentSays(bus, "Шесть!");
 
-    expect(api.reviewFlag.mock.calls[0][0].context.map((l) => l.text)).toEqual([
+    expect(api.reviewFlag.mock.lastCall?.[0].context.map((l) => l.text)).toEqual([
       "два",
       "три",
       "четыре",
     ]);
   });
 
-  it("uses the parent's words too", () => {
-    const { bus, api } = harness(["тайна"]);
-
-    childSays(bus, "У нас с дядей тайна");
-
-    expect(api.reviewFlag).toHaveBeenCalledOnce();
-  });
-
-  it("sends nothing for an ordinary message", () => {
-    const { bus, api } = harness();
-
-    childSays(bus, "Расскажи про космос");
-
-    expect(api.reviewFlag).not.toHaveBeenCalled();
-  });
-
-  it("sends the child's message when the agent answers with its alarm phrase", () => {
-    const { bus, api } = harness();
-
-    childSays(bus, "Мамы второй день нет дома, я голодный, сижу один");
-    bus.emit({ type: "llm-token", token: "Если тебе страшно, давай ", at: 0 });
-    bus.emit({ type: "llm-token", token: "поговорим об этом. Ты сейчас один?", at: 0 });
-
-    expect(api.reviewFlag).toHaveBeenCalledOnce();
-    expect(api.reviewFlag).toHaveBeenCalledWith({
-      text: "Мамы второй день нет дома, я голодный, сижу один",
-      matched: ["agent: alarm phrase"],
-      context: [],
-    });
-  });
-
-  it("reviews a message once when both a stem and the agent flag it", () => {
-    const { bus, api } = harness();
+  it("does not lose the last message when the conversation ends before the answer", () => {
+    const { bus, api, stop } = harness();
 
     childSays(bus, "Мне страшно");
-    bus.emit({ type: "agent-reply", text: "Если тебе страшно — давай поговорим об этом!", at: 0 });
+    stop();
 
-    expect(api.reviewFlag).toHaveBeenCalledOnce();
-  });
-
-  it("ignores an ordinary reply", () => {
-    const { bus, api } = harness();
-
-    childSays(bus, "Расскажи про космос");
-    bus.emit({ type: "agent-reply", text: "Космос огромный! Давай поговорим об этом.", at: 0 });
-
-    expect(api.reviewFlag).not.toHaveBeenCalled();
+    expect(api.reviewFlag).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Мне страшно", agentReply: undefined }),
+    );
   });
 
   it("stops listening once the conversation is over", () => {
     const { bus, api, stop } = harness();
 
     stop();
-    childSays(bus, "не хочу жить");
+    childSays(bus, "Мне страшно");
+    agentSays(bus, "…");
 
     expect(api.reviewFlag).not.toHaveBeenCalled();
   });

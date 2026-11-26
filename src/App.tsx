@@ -11,7 +11,7 @@ import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
 import { buildChildPrompt } from "./lib/parental/childPrompt";
 import { createParentApi } from "./lib/parental/parentApi";
 import { watchForFlags } from "./lib/parental/flagReporter";
-import { parseTriggerWords } from "./lib/parental/triggers";
+import { logTranscript } from "./lib/parental/transcriptLogger";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
@@ -199,11 +199,12 @@ export function App() {
         return;
       }
       stopFlagWatchRef.current?.();
-      stopFlagWatchRef.current = watchForFlags(
-        bus,
-        parentApi,
-        parseTriggerWords(settings.triggerWords),
-      );
+      const stopFlags = watchForFlags(bus, parentApi);
+      const stopLog = logTranscript(bus, parentApi);
+      stopFlagWatchRef.current = () => {
+        stopFlags();
+        stopLog();
+      };
       if (recording) {
         setSavedAs(null);
         recorder.start();

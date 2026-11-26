@@ -1,4 +1,4 @@
-import type { Flag, FlagCandidate, ParentSettings } from "./types";
+import type { ContextLine, Flag, FlagCandidate, ParentSettings } from "./types";
 
 /** Same origin: the dev server proxies `/api` to `server/` (see `vite.config.ts`). */
 export const PARENT_API_URL = "/api";
@@ -9,6 +9,7 @@ export interface ParentApi {
   reviewFlag(candidate: FlagCandidate): Promise<{ flagged: boolean }>;
   listFlags(): Promise<Flag[]>;
   deleteChildData(): Promise<unknown>;
+  appendTranscript(line: ContextLine): Promise<unknown>;
 }
 
 export class ParentApiError extends Error {
@@ -44,5 +45,6 @@ export function createParentApi(
     reviewFlag: (candidate) => request("POST", "/flags/review", candidate),
     listFlags: () => request("GET", "/flags"),
     deleteChildData: () => request("DELETE", "/child-data"),
+    appendTranscript: (line) => request("POST", "/transcript", line),
   };
 }

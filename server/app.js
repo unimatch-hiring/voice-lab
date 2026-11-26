@@ -9,6 +9,8 @@ export function createApp(service) {
     "PUT /api/settings": async (req) => service.saveSettings(await readJson(req)),
     "POST /api/flags/review": async (req) => service.reviewFlag(await readJson(req)),
     "GET /api/flags": () => service.listFlags(),
+    "POST /api/transcript": async (req) => service.appendTranscript(await readJson(req)),
+    "GET /api/transcript": () => service.listTranscript(),
     "DELETE /api/child-data": () => service.deleteChildData(),
   };
 

@@ -4,8 +4,9 @@ import { createOpenAiClassifier } from "./llmClassifier.js";
 
 const CANDIDATE = {
   text: "Папа опять меня бьёт, когда мама на работе",
-  matched: ["меня бьет"],
+  parentConcerns: "дядя Вася",
   context: [{ role: "assistant", text: "Как прошёл твой день?" }],
+  agentReply: "Мне очень жаль, ты сейчас в безопасности?",
 };
 const VERDICT = { concern: true, category: "abuse", severity: "high", reason: "Ребёнок говорит о побоях." };
 
@@ -35,6 +36,8 @@ describe("OpenAI classifier", () => {
     expect(body.model).toBe("gpt-test");
     expect(body.messages[1].content).toContain(CANDIDATE.text);
     expect(body.messages[1].content).toContain("Как прошёл твой день?");
+    expect(body.messages[1].content).toContain(CANDIDATE.agentReply);
+    expect(body.messages[1].content).toContain("дядя Вася");
     expect(body.response_format.json_schema.strict).toBe(true);
   });
 

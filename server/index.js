@@ -12,7 +12,7 @@ const PORT = Number(process.env.PORT ?? 8790);
 const classifier = createOpenAiClassifier({
   apiKey: process.env.OPENAI_API_KEY,
   // OpenRouter is our provider; the classifier speaks the OpenAI-compatible API it exposes.
-  model: process.env.OPENAI_MODEL ?? "openai/gpt-4o-mini",
+  model: process.env.OPENAI_MODEL ?? "typesafe/jev-router",
   baseUrl: process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1",
 });
 const service = createChildService(createJsonStore(DATA_FILE, EMPTY_DOC), classifier);

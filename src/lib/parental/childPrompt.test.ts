@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { buildChildPrompt } from "./childPrompt";
-import { AGENT_ALARM_PHRASES } from "./triggers";
 import { EMPTY_SETTINGS } from "./types";
 
 describe("the child's prompt", () => {
@@ -22,11 +21,6 @@ describe("the child's prompt", () => {
 
     expect(prompt).toMatch(/child/);
     expect(prompt).not.toMatch(/must not discuss|from their parent/);
-  });
-
-  it("tells the agent the exact alarm phrase the page listens for", () => {
-    expect(buildChildPrompt(EMPTY_SETTINGS)).toContain(AGENT_ALARM_PHRASES[0]);
-    expect(buildChildPrompt(EMPTY_SETTINGS)).toContain(AGENT_ALARM_PHRASES[1]);
   });
 
   it("never leaks the alarm words into what the agent is told", () => {

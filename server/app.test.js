@@ -61,7 +61,7 @@ describe("parental HTTP API", () => {
 
   it("hands a flag candidate to the service for review", async () => {
     service.reviewFlag.mockResolvedValue({ flagged: false });
-    const candidate = { text: "hi", matched: ["x"], context: [] };
+    const candidate = { text: "hi", context: [] };
 
     const r = await fetch(`${base}/api/flags/review`, {
       method: "POST",

@@ -2,15 +2,17 @@ const OPENAI_BASE_URL = "https://api.openai.com/v1";
 // Generous: the review runs off the conversation path, so a slow answer blocks nothing.
 const TIMEOUT_MS = 30_000;
 
-export const CATEGORIES = ["self_harm", "abuse", "violence", "sexual", "bullying", "danger", "other", "none"];
+export const CATEGORIES = ["self_harm", "abuse", "neglect", "violence", "sexual", "bullying", "danger", "other", "none"];
 export const SEVERITIES = ["low", "medium", "high", "none"];
 
 const INSTRUCTIONS = `You review messages a child said to a voice assistant, for their parent.
-A keyword filter or the assistant itself has flagged the message; most flags are harmless (games, films,
+Every message the child says reaches you; most are harmless (games, films,
 jokes, figures of speech). Decide whether the child may actually be at risk or in distress:
-self-harm, abuse, violence against or by the child, sexual content, bullying, or other danger.
-Use the recent conversation to judge the context. When unsure, prefer flagging a real risk
-over missing one. Write the reason in one short sentence, in the language of the message.`;
+self-harm, abuse, neglect (left alone, hungry, cold), violence against or by the child, sexual
+content, bullying, or other danger. Take the parent's concerns into account when given.
+Use the recent conversation and the assistant's reply to judge the context. When unsure, prefer flagging a real risk
+over missing one. When concern is true, category and severity are never "none".
+Write the reason in one short sentence, in the language of the message.`;
 
 const VERDICT_SCHEMA = {
   type: "object",
@@ -30,7 +32,7 @@ const VERDICT_SCHEMA = {
  */
 export function createOpenAiClassifier({ apiKey, model, baseUrl = OPENAI_BASE_URL, fetchImpl = fetch }) {
   return {
-    async classify({ text, matched, context }) {
+    async classify({ text, context, agentReply, parentConcerns }) {
       if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
 
       const r = await fetchImpl(`${baseUrl}/chat/completions`, {
@@ -45,8 +47,9 @@ export function createOpenAiClassifier({ apiKey, model, baseUrl = OPENAI_BASE_UR
               role: "user",
               content: JSON.stringify({
                 child_message: text,
-                matched_words: matched,
                 recent_conversation: context,
+                assistant_reply: agentReply ?? null,
+                parent_concerns: parentConcerns || null,
               }),
             },
           ],
