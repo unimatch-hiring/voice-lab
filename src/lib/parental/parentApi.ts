@@ -1,4 +1,4 @@
-import type { ParentSettings } from "./types";
+import type { Flag, FlagCandidate, ParentSettings } from "./types";
 
 /** Same origin: the dev server proxies `/api` to `server/` (see `vite.config.ts`). */
 export const PARENT_API_URL = "/api";
@@ -6,6 +6,8 @@ export const PARENT_API_URL = "/api";
 export interface ParentApi {
   getSettings(): Promise<ParentSettings>;
   saveSettings(settings: ParentSettings): Promise<ParentSettings>;
+  reviewFlag(candidate: FlagCandidate): Promise<{ flagged: boolean }>;
+  listFlags(): Promise<Flag[]>;
 }
 
 export class ParentApiError extends Error {
@@ -38,5 +40,7 @@ export function createParentApi(
   return {
     getSettings: () => request("GET", "/settings"),
     saveSettings: (settings) => request("PUT", "/settings", settings),
+    reviewFlag: (candidate) => request("POST", "/flags/review", candidate),
+    listFlags: () => request("GET", "/flags"),
   };
 }

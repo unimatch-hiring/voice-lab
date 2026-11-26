@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createParentApi, type ParentApi } from "./lib/parental/parentApi";
-import type { ParentSettings } from "./lib/parental/types";
+import type { Flag, ParentSettings } from "./lib/parental/types";
 import "./scene/tokens.css";
 import "./parent.css";
 
@@ -32,15 +32,19 @@ const UNREACHABLE = "The parental server is not reachable. Start it with npm run
 export function Parent({ api: injected }: { api?: ParentApi }) {
   const api = useMemo(() => injected ?? createParentApi(), [injected]);
   const [settings, setSettings] = useState<ParentSettings | null>(null);
+  const [flags, setFlags] = useState<Flag[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    api
-      .getSettings()
-      .then((s) => alive && setSettings(s))
+    Promise.all([api.getSettings(), api.listFlags()])
+      .then(([s, f]) => {
+        if (!alive) return;
+        setSettings(s);
+        setFlags(f);
+      })
       .catch(() => alive && setError(UNREACHABLE));
     return () => {
       alive = false;
@@ -112,6 +116,55 @@ export function Parent({ api: injected }: { api?: ParentApi }) {
           {error && <p className="parent-error">{error}</p>}
         </form>
       </section>
+
+      {settings && (
+        <section className="panel">
+          <div className="panel-head">
+            <span className="readout">Alarm flags</span>
+          </div>
+          <div className="panel-body">
+            {flags.length === 0 ? (
+              <p className="hint">Nothing worrying so far.</p>
+            ) : (
+              <ul className="parent-flags">
+                {flags.map((flag) => (
+                  <FlagItem key={flag.id} flag={flag} />
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
     </main>
+  );
+}
+
+function FlagItem({ flag }: { flag: Flag }) {
+  return (
+    <li className="parent-flag" data-status={flag.status}>
+      <div className="parent-flag-head">
+        <time>{new Date(flag.at).toLocaleString()}</time>
+        <span>
+          {flag.status === "confirmed"
+            ? `${flag.category?.replace("_", " ")} · ${flag.severity}`
+            : "Not verified: the review was unavailable"}
+        </span>
+      </div>
+      {flag.reason && <p className="parent-flag-reason">{flag.reason}</p>}
+      <blockquote>{flag.text}</blockquote>
+      <p className="hint">Matched: {flag.matched.join(", ")}</p>
+      {flag.context.length > 0 && (
+        <details>
+          <summary>What was said before</summary>
+          <ul>
+            {flag.context.map((line, i) => (
+              <li key={i}>
+                <b>{line.role}:</b> {line.text}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </li>
   );
 }

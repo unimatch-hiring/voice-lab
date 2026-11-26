@@ -42,7 +42,10 @@ vi.mock("./lib/pipeline/createSession", () => ({
   },
 }));
 
-const parent = vi.hoisted(() => ({ getSettings: vi.fn<() => Promise<ParentSettings>>() }));
+const parent = vi.hoisted(() => ({
+  getSettings: vi.fn<() => Promise<ParentSettings>>(),
+  reviewFlag: vi.fn(async () => ({ flagged: true })),
+}));
 vi.mock("./lib/parental/parentApi", () => ({ createParentApi: () => parent }));
 
 beforeEach(() => {
@@ -117,4 +120,20 @@ test("without the parent's settings no conversation starts", async () => {
 
   expect(await screen.findByText(/settings could not be loaded/i)).toBeTruthy();
   expect(created).toHaveLength(0);
+});
+
+test("a child's alarming message during the conversation is sent for review", async () => {
+  parent.getSettings.mockResolvedValue({ ...EMPTY_SETTINGS, triggerWords: "тайна" });
+  render(<App />);
+  fireEvent.click(await startButton());
+  await waitFor(() => expect(created).toHaveLength(1));
+
+  created[0].deps.bus.emit({
+    type: "stt-result",
+    result: { text: "Дядя сказал, что это наша тайна", words: [] },
+  });
+
+  expect(parent.reviewFlag).toHaveBeenCalledWith(
+    expect.objectContaining({ text: "Дядя сказал, что это наша тайна" }),
+  );
 });

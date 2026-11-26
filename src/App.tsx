@@ -10,6 +10,8 @@ import { loadToken, saveToken } from "./lib/tokenStore";
 import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
 import { buildChildPrompt } from "./lib/parental/childPrompt";
 import { createParentApi } from "./lib/parental/parentApi";
+import { watchForFlags } from "./lib/parental/flagReporter";
+import { parseTriggerWords } from "./lib/parental/triggers";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
 import { Transcript } from "./scene/Transcript";
@@ -103,6 +105,9 @@ export function App() {
     [config],
   );
   const parentApi = useMemo(() => createParentApi(), []);
+  /** Stops watching the last conversation's messages for alarm phrases. */
+  const stopFlagWatchRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopFlagWatchRef.current?.(), []);
 
   // The engine is set per key in the admin page and can be switched mid-session, so it
   // is asked for on load (for the notice) and again before every conversation.
@@ -193,6 +198,12 @@ export function App() {
         setError(SETTINGS_UNAVAILABLE);
         return;
       }
+      stopFlagWatchRef.current?.();
+      stopFlagWatchRef.current = watchForFlags(
+        bus,
+        parentApi,
+        parseTriggerWords(settings.triggerWords),
+      );
       if (recording) {
         setSavedAs(null);
         recorder.start();

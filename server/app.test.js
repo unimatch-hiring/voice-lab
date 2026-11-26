@@ -9,6 +9,8 @@ let base;
 const service = {
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
+  reviewFlag: vi.fn(),
+  listFlags: vi.fn(),
 };
 
 beforeEach(async () => {
@@ -54,6 +56,25 @@ describe("parental HTTP API", () => {
     const r = await fetch(`${base}/api/settings`, { method: "PUT", body: "{}" });
 
     expect(r.status).toBe(400);
+  });
+
+  it("hands a flag candidate to the service for review", async () => {
+    service.reviewFlag.mockResolvedValue({ flagged: false });
+    const candidate = { text: "hi", matched: ["x"], context: [] };
+
+    const r = await fetch(`${base}/api/flags/review`, {
+      method: "POST",
+      body: JSON.stringify(candidate),
+    });
+
+    expect(await r.json()).toEqual({ flagged: false });
+    expect(service.reviewFlag).toHaveBeenCalledWith(candidate);
+  });
+
+  it("lists the stored flags", async () => {
+    service.listFlags.mockResolvedValue([{ id: "1" }]);
+
+    expect(await (await fetch(`${base}/api/flags`)).json()).toEqual([{ id: "1" }]);
   });
 
   it("answers 404 to anything else", async () => {

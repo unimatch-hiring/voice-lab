@@ -49,3 +49,41 @@
   font: 13px/1.4 var(--sans);
   color: var(--fail);
 }
+
+.parent-flags {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.parent-flag {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--fail);
+  border-radius: var(--radius);
+}
+
+.parent-flag[data-status="unverified"] {
+  border-style: dashed;
+}
+
+.parent-flag-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font: 600 12px/1.2 var(--mono);
+  color: var(--rack-dim);
+}
+
+.parent-flag-reason,
+.parent-flag blockquote {
+  margin: 0;
+}
+
+.parent-flag blockquote {
+  padding-left: 10px;
+  border-left: 2px solid var(--fail);
+}

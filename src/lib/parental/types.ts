@@ -12,3 +12,25 @@ export const EMPTY_SETTINGS: ParentSettings = {
   childProfile: "",
   triggerWords: "",
 };
+
+export interface ContextLine {
+  role: "child" | "assistant";
+  text: string;
+}
+
+/** A message that matched an alarm word, sent for review. Mirrors `parseCandidate` on the server. */
+export interface FlagCandidate {
+  text: string;
+  matched: string[];
+  context: ContextLine[];
+}
+
+/** Stored only when the review confirmed a concern, or could not run. */
+export interface Flag extends FlagCandidate {
+  id: string;
+  at: number;
+  status: "confirmed" | "unverified";
+  category?: string;
+  severity?: "low" | "medium" | "high" | "none";
+  reason?: string;
+}

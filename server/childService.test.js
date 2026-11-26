@@ -2,15 +2,17 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createChildService, EMPTY_DOC, ValidationError } from "./childService.js";
 import { createJsonStore } from "./jsonStore.js";
 
 let dir;
 let file;
-const serviceOn = (path) => createChildService(createJsonStore(path, EMPTY_DOC));
+const classifier = { classify: vi.fn() };
+const serviceOn = (path) => createChildService(createJsonStore(path, EMPTY_DOC), classifier);
 
 beforeEach(async () => {
+  classifier.classify.mockReset();
   dir = await mkdtemp(join(tmpdir(), "parental-"));
   file = join(dir, "db.json");
 });
@@ -48,5 +50,58 @@ describe("parent settings", () => {
     ]);
 
     expect((await serviceOn(file).getSettings()).childProfile).toBe("second");
+  });
+});
+
+const CANDIDATE = {
+  text: "Мне страшно идти домой, папа меня бьёт",
+  matched: ["меня бьет"],
+  context: [{ role: "assistant", text: "Что ты будешь делать после школы?" }],
+};
+const CONCERN = { concern: true, category: "abuse", severity: "high", reason: "Говорит о побоях." };
+
+describe("alarm flags", () => {
+  it("keeps a confirmed concern with the child's full message and the context", async () => {
+    classifier.classify.mockResolvedValue(CONCERN);
+
+    expect((await serviceOn(file).reviewFlag(CANDIDATE)).flagged).toBe(true);
+
+    const [flag] = await serviceOn(file).listFlags();
+    const { concern, ...review } = CONCERN;
+    expect(flag).toEqual({ ...CANDIDATE, ...review, status: "confirmed", id: flag.id, at: flag.at });
+    expect(flag.id).toBeTruthy();
+  });
+
+  it("does not store a match the review found harmless", async () => {
+    classifier.classify.mockResolvedValue({ ...CONCERN, concern: false, category: "none" });
+
+    expect(await serviceOn(file).reviewFlag(CANDIDATE)).toEqual({ flagged: false });
+    expect(await serviceOn(file).listFlags()).toEqual([]);
+  });
+
+  it("keeps the flag as unverified when the review is unavailable", async () => {
+    classifier.classify.mockRejectedValue(new Error("OpenAI answered 503"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await serviceOn(file).reviewFlag(CANDIDATE);
+
+    const [flag] = await serviceOn(file).listFlags();
+    expect(flag).toMatchObject({ text: CANDIDATE.text, status: "unverified" });
+  });
+
+  it("lists the newest flag first", async () => {
+    classifier.classify.mockResolvedValue(CONCERN);
+    const service = serviceOn(file);
+    await service.reviewFlag({ ...CANDIDATE, text: "first" });
+    await service.reviewFlag({ ...CANDIDATE, text: "second" });
+
+    expect((await service.listFlags()).map((f) => f.text)).toEqual(["second", "first"]);
+  });
+
+  it("refuses a candidate without the words that matched", async () => {
+    await expect(serviceOn(file).reviewFlag({ ...CANDIDATE, matched: [] })).rejects.toThrow(
+      ValidationError,
+    );
+    expect(classifier.classify).not.toHaveBeenCalled();
   });
 });

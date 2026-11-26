@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Parent } from "./Parent";
 import type { ParentApi } from "./lib/parental/parentApi";
-import type { ParentSettings } from "./lib/parental/types";
+import type { Flag, ParentSettings } from "./lib/parental/types";
 
 afterEach(cleanup);
 
@@ -17,6 +17,8 @@ function fakeApi(overrides: Partial<ParentApi> = {}): ParentApi {
   return {
     getSettings: vi.fn(async () => STORED),
     saveSettings: vi.fn(async (s: ParentSettings) => s),
+    reviewFlag: vi.fn(async () => ({ flagged: false })),
+    listFlags: vi.fn(async (): Promise<Flag[]> => []),
     ...overrides,
   };
 }
@@ -44,6 +46,37 @@ describe("parent page", () => {
       expect(api.saveSettings).toHaveBeenCalledWith({ ...STORED, triggerWords: "secret" }),
     );
     expect(await screen.findByText(/saved\./i)).toBeTruthy();
+  });
+
+  it("shows each flag with the child's full message and whether it was verified", async () => {
+    const flags: Flag[] = [
+      {
+        id: "1",
+        at: 0,
+        status: "confirmed",
+        category: "abuse",
+        severity: "high",
+        reason: "Talks about being hit at home.",
+        text: "Papa hits me when mum is at work",
+        matched: ["hits me"],
+        context: [{ role: "assistant", text: "How was your day?" }],
+      },
+      {
+        id: "2",
+        at: 0,
+        status: "unverified",
+        text: "I want to die in this game",
+        matched: ["want to die"],
+        context: [],
+      },
+    ];
+    render(<Parent api={fakeApi({ listFlags: async () => flags })} />);
+
+    expect(await screen.findByText("Papa hits me when mum is at work")).toBeTruthy();
+    expect(screen.getByText("Talks about being hit at home.")).toBeTruthy();
+    expect(screen.getByText("How was your day?")).toBeTruthy();
+    expect(screen.getByText("I want to die in this game")).toBeTruthy();
+    expect(screen.getByText(/not verified/i)).toBeTruthy();
   });
 
   it("says so when the server is down instead of showing an empty form", async () => {

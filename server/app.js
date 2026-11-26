@@ -7,6 +7,8 @@ export function createApp(service) {
   const routes = {
     "GET /api/settings": () => service.getSettings(),
     "PUT /api/settings": async (req) => service.saveSettings(await readJson(req)),
+    "POST /api/flags/review": async (req) => service.reviewFlag(await readJson(req)),
+    "GET /api/flags": () => service.listFlags(),
   };
 
   return async function handle(req, res) {
