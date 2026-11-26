@@ -6,7 +6,7 @@ export const CATEGORIES = ["self_harm", "abuse", "violence", "sexual", "bullying
 export const SEVERITIES = ["low", "medium", "high", "none"];
 
 const INSTRUCTIONS = `You review messages a child said to a voice assistant, for their parent.
-A keyword filter has already matched the message; most matches are harmless (games, films,
+A keyword filter or the assistant itself has flagged the message; most flags are harmless (games, films,
 jokes, figures of speech). Decide whether the child may actually be at risk or in distress:
 self-harm, abuse, violence against or by the child, sexual content, bullying, or other danger.
 Use the recent conversation to judge the context. When unsure, prefer flagging a real risk

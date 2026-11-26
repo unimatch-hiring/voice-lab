@@ -12,6 +12,16 @@ export const DEFAULT_TRIGGERS = [
   "secret", "don't tell", "scared", "afraid", "bully",
 ];
 
+/**
+ * The agent says one of these, word for word, when it senses distress the stems missed
+ * (see `childPrompt.ts`); the page catches it and sends the child's message for review.
+ */
+export const AGENT_ALARM_PHRASES = [
+  "Если тебе страшно, давай поговорим об этом.",
+  "If you are scared, let's talk about it.",
+];
+export const AGENT_ALARM_MATCH = "agent: alarm phrase";
+
 const normalize = (s: string) => s.toLowerCase().replaceAll("ё", "е").replace(/\s+/g, " ").trim();
 
 /** The parent's free-form field: one phrase per line or separated by commas. */
@@ -20,6 +30,14 @@ export function parseTriggerWords(text: string): string[] {
     .split(/[\n,;]/)
     .map(normalize)
     .filter(Boolean);
+}
+
+// Speech synthesis and the model may vary punctuation, never the words.
+const words = (s: string) => normalize(s).replace(/[^\p{L}\p{N} ]/gu, "");
+
+export function hasAgentAlarm(reply: string): boolean {
+  const said = words(reply);
+  return AGENT_ALARM_PHRASES.some((p) => said.includes(words(p)));
 }
 
 /** Every alarm phrase found in the message, default ones and the parent's. */
