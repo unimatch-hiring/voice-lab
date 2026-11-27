@@ -253,6 +253,18 @@ body {
   font-size: 13px;
 }
 
+.history-line {
+  margin: 0;
+  color: var(--rack-dim);
+  font-size: 13px;
+}
+
+.history-line[data-state="notSaved"] {
+  color: var(--fail);
+}
+
+.history-line a { color: var(--running); }
+
 /* The row is always in the layout, visible only when there is something to say:
    letting it appear pushed everything below it down by its own height mid-run. */
 .status-line {
@@ -765,6 +777,9 @@ body {
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease;
 }
+
+/* The history link shares the toggle's look but navigates, so it is an anchor. */
+a.settings-toggle { text-decoration: none; }
 
 .settings-toggle:hover,
 .settings-toggle[aria-expanded="true"] {

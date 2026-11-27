@@ -36,9 +36,14 @@ export type PipelineEvent =
   // `at` is mandatory: without it token rate is measured by arrival time,
   // i.e. by the transport rather than by the model.
   | { type: "llm-token"; token: string; at: number }
-  /** A complete agent reply, for providers that report it as one message. */
-  | { type: "agent-reply"; text: string; at: number }
+  /**
+   * A complete agent reply. `streamed` is true when the same text already arrived as
+   * `llm-token`s, so a view that showed the tokens does not show it twice.
+   */
+  | { type: "agent-reply"; text: string; at: number; streamed?: boolean }
   // Input audio level, ~100 Hz. Emitted by capture with a live mic; offline there
   // are no such events and the scene shows 0.
   | { type: "audio-level"; rms: number; at: number }
-  | { type: "turn-end"; at: number; metrics: TurnMetrics };
+  | { type: "turn-end"; at: number; metrics: TurnMetrics }
+  // Emitted once when an ElevenLabs session connects; the backup engine does not emit it.
+  | { type: "conversation-start"; conversationId: string; agentId: string; at: number };

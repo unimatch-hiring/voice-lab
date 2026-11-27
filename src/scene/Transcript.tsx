@@ -50,9 +50,9 @@ export function Transcript({ bus }: { bus: EventBus }) {
           break;
         case "agent-reply":
           // Whole-message providers: replace the streamed line if there is one, so the
-          // reply is not shown twice.
+          // reply is not shown twice; a reply already shown token by token adds nothing.
           if (openReply.current) openReply.current.textContent = e.text;
-          else addRow("agent", e.text);
+          else if (!e.streamed) addRow("agent", e.text);
           openReply.current = null;
           break;
         case "llm-token": {

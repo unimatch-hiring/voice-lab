@@ -12,6 +12,7 @@ npm ci
 npm test          # vitest, ~2s
 npm run build     # type-check (tsc -b) is part of it
 npm run dev       # http://localhost:5173
+npm run server    # local history server, http://127.0.0.1:8788
 ```
 
 **Show the output of both before calling anything finished.** Neither is optional and
@@ -41,6 +42,7 @@ Read the doc for the area you are touching before you touch it.
 | [docs/pipeline.md](docs/pipeline.md) | stage mapping, turn boundaries, why not our own pipeline |
 | [docs/mouth.md](docs/mouth.md) | lip sync: amplitude source, invariants, sprites |
 | [docs/deploy.md](docs/deploy.md) | Pages, Worker, secrets |
+| [docs/history.md](docs/history.md) | conversation history: what is kept, whose, the local server |
 
 ## Non-negotiable
 

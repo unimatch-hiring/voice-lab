@@ -9,6 +9,8 @@ import { TurnModel } from "../../scene/turnModel";
 const handlers: Record<string, (arg?: unknown) => void> = {};
 /** What the session asked the SDK for, so the handshake itself can be asserted on. */
 let startOptions: Record<string, unknown> = {};
+/** The SDK's endSession() reports the end through onDisconnect; the default mock stays silent. */
+let disconnectOnEnd = false;
 
 vi.mock("@elevenlabs/client", () => ({
   Conversation: {
@@ -18,7 +20,9 @@ vi.mock("@elevenlabs/client", () => ({
         if (typeof value === "function") handlers[key] = value as () => void;
       }
       return {
-        endSession: async () => {},
+        endSession: async () => {
+          if (disconnectOnEnd) handlers.onDisconnect?.({ reason: "user" });
+        },
         getOutputVolume: () => 0,
         getOutputByteFrequencyData: () => new Uint8Array(1024),
       };
@@ -26,7 +30,10 @@ vi.mock("@elevenlabs/client", () => ({
   },
 }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  disconnectOnEnd = false;
+});
 
 async function harness() {
   const bus = new EventBus();
@@ -34,16 +41,17 @@ async function harness() {
   bus.on((e) => events.push(e));
 
   const turns: TurnMetrics[] = [];
+  const ended: string[] = [];
 
   const session = new AgentSession({
     bus,
     transport: { agentToken: async () => ({ token: "t", agentId: "a" }) } as never,
     onTurn: (m) => turns.push(m),
-    onEnded: () => {},
+    onEnded: (reason) => ended.push(reason),
   });
 
   await session.start();
-  return { session, events, turns };
+  return { session, events, turns, ended };
 }
 
 const lanes = (events: PipelineEvent[], type: "stage-start" | "stage-end") =>
@@ -119,6 +127,20 @@ test("the token counter starts over on every turn instead of growing for the who
   expect(model.tokens).toBe(1);
 });
 
+test("a reply streamed in parts still reaches the bus whole, so the recorders keep it", async () => {
+  const { events } = await harness();
+
+  handlers.onAgentChatResponsePart?.({ text: "Hello " } as never);
+  handlers.onAgentChatResponsePart?.({ text: "there" } as never);
+  handlers.onMessage?.({ message: "Hello there", source: "ai" } as never);
+  handlers.onMessage?.({ message: "Said whole", source: "ai" } as never);
+
+  expect(events.filter((e) => e.type === "agent-reply")).toEqual([
+    { type: "agent-reply", text: "Hello there", at: expect.any(Number), streamed: true },
+    { type: "agent-reply", text: "Said whole", at: expect.any(Number), streamed: false },
+  ]);
+});
+
 test("end to end is the turn's wall-clock time, not the sum of overlapping stages", async () => {
   let now = 0;
   vi.spyOn(performance, "now").mockImplementation(() => now);
@@ -136,4 +158,29 @@ test("end to end is the turn's wall-clock time, not the sum of overlapping stage
   at(2000, () => handlers.onModeChange?.({ mode: "listening" } as never));
 
   expect(turns[0].totalMs).toBe(2000);
+});
+
+test("the conversation id and the agent id reach the page once the session connects", async () => {
+  const { events } = await harness();
+
+  handlers.onConnect?.({ conversationId: "c1" });
+
+  expect(events.filter((e) => e.type === "conversation-start")).toEqual([
+    { type: "conversation-start", conversationId: "c1", agentId: "a", at: expect.any(Number) },
+  ]);
+});
+
+test("nothing announces a conversation before the SDK reports the connection", async () => {
+  const { events } = await harness();
+
+  expect(events.some((e) => e.type === "conversation-start")).toBe(false);
+});
+
+test("stopping the session reports the end once, as the user's", async () => {
+  disconnectOnEnd = true;
+  const { session, ended } = await harness();
+
+  await session.stop();
+
+  expect(ended).toEqual(["user"]);
 });

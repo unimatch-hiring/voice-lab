@@ -1,0 +1,57 @@
+schema: spec-driven
+
+# Shown to the AI when it writes any artifact. Only what reading the code will not tell you;
+# conventions live in CLAUDE.md and docs/conventions.md, and each area has its doc in docs/.
+context: |
+  voice-lab is an interactive explainer of a voice-agent pipeline. We own the presentation,
+  not the conversation: it runs on ElevenLabs Agents, with Deepgram's Voice Agent API as a
+  backup engine chosen per access key. What the page promises is honest timings — a change
+  that makes the scene lag or guess is a product defect, not a cosmetic one.
+
+  Nobody can hold a live conversation locally without a paid key and the deployed Worker,
+  so behaviour is proven by vitest, not by talking to the agent. The SDK owns the events:
+  their shape is in node_modules/@elevenlabs/client/dist (.d.ts), their order in its .js.
+  docs/pipeline.md records what we observed; where it disagrees with the SDK, the doc is wrong.
+
+  Some behaviour is configured outside this repository and cannot be changed by a commit:
+  the agent's client_events and whether it allows the prompt override (ElevenLabs
+  dashboard), and the Worker's secrets, KV namespace and allowlist (wrangler / KV writes).
+
+  A green CI run on main deploys the Pages site, and the Worker when worker/ changed.
+  Previews run unreviewed code and live on a separate origin from the admin page.
+
+  Halves of the codebase: src/scene (draws the event stream), src/lib/pipeline (the
+  sessions, one per engine), src/lib (transport, token storage, the mouth's signal path),
+  worker/ (Cloudflare Worker: tokens, interview keys, admin sign-in), server/ (local Node
+  history server on node:sqlite, never deployed), .github/ (CI, previews).
+
+rules:
+  proposal:
+    - Name which halves the change touches. A fact that must travel from the pipeline to the scene arrives as a new or changed event in src/lib/types.ts; say which.
+    - State whether the change applies to both engines. If only to one, say what the other shows instead (a blank lane, a notice).
+    - List every step outside the repository the change needs (ElevenLabs agent settings, wrangler secret, KV write, repository variable) as a manual step, with who does it.
+    - A change that needs a new runtime dependency beyond React and @elevenlabs/client is out of scope as written; propose it without one.
+  specs:
+    - Requirements describe what a visitor, an interviewer or a reviewer can observe — a lane, a duration, the mouth, a message on the page, an HTTP status. Do not name modules, files or SDK callbacks in requirements.
+    - Every requirement has at least one scenario, and every scenario can be checked by a vitest test without a live key.
+    - Lip-sync scenarios state measurable properties (frame hold, exactly one opaque frame, shut when the signal stops), never "looks natural".
+    - Worker scenarios cover the refused case alongside the allowed one, with its status code.
+  design:
+    - Cite SDK behaviour from node_modules/@elevenlabs/client/dist with the installed version from package-lock.json, not from vendor docs or memory. Mark anything not checked there as unverified.
+    - Say how the change keeps high-frequency data (audio, tokens, animation frames, stage progress) in refs read by the one requestAnimationFrame loop, with zero React renders per frame.
+    - A threshold or timing constant comes from a measurement on the recorded fixtures (?bench) and states the sample it was measured on.
+    - Name the docs/ page (or worker/README.md) whose description the change alters.
+  tasks:
+    - Each behaviour task names its test and how that test fails when the change is reverted.
+    - Updating the area doc is its own task.
+    - The last task runs npm test and npm run build and shows the output of both.
+
+operations:
+  apply:
+    guidance:
+      - After each task run npm test; before calling the change done run npm run build too. Capture the exit code as its own step (cmd > out.txt 2>&1; echo "EXIT=$?").
+      - For every new test, revert the change and confirm the test fails, then restore it.
+      - Do not push to main. Work on a branch and open a pull request; a green main deploys.
+  archive:
+    guidance:
+      - Every spec scenario has a passing test, and the area doc in docs/ describes the final behaviour rather than the plan.

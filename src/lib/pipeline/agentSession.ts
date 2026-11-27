@@ -87,7 +87,7 @@ export class AgentSession implements VoiceSession {
   async start(): Promise<void> {
     if (this.running) return;
 
-    const { token } = await this.deps.transport.agentToken();
+    const { token, agentId } = await this.deps.transport.agentToken();
     this.resetTurn();
 
     this.conversation = await Conversation.startSession({
@@ -95,6 +95,15 @@ export class AgentSession implements VoiceSession {
 
       // The role travels with the handshake: the server applies it only at start.
       overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+
+      onConnect: ({ conversationId }) => {
+        this.deps.bus.emit({
+          type: "conversation-start",
+          conversationId,
+          agentId,
+          at: performance.now(),
+        });
+      },
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
@@ -137,14 +146,11 @@ export class AgentSession implements VoiceSession {
         }
 
         // `onAgentChatResponsePart` streams the reply earlier but is experimental and does
-        // not always fire, so this is the source of record.
+        // not always fire, so this is the source of record: the recorders keep only this.
         this.metrics.ttsChars += message.length;
-        if (this.streamedReply.trim() === message.trim()) {
-          this.streamedReply = "";
-          return;
-        }
+        const streamed = this.streamedReply.trim() === message.trim();
         this.streamedReply = "";
-        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
+        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now(), streamed });
       },
 
       onAgentChatResponsePart: (part) => {

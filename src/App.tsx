@@ -7,6 +7,10 @@ import { createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
+import { HistorySaver } from "./lib/historySaver";
+import type { SaveLine } from "./lib/historySaver";
+import { browserUserId } from "./lib/userId";
+import { saveLineText } from "./lib/historySaveLine";
 import { Recorder, fixtureFilename, toFixtureJson } from "./lib/recorder";
 import { Waterfall } from "./scene/Waterfall";
 import { StageBreakdown } from "./scene/StageBreakdown";
@@ -82,6 +86,20 @@ export function App() {
   }, []);
   /** Who ended the last conversation, so the transport row can say so. */
   const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
+  // No id is made, or stored, on a build that keeps no history.
+  const userId = useMemo(() => (config.historyUrl ? browserUserId() : null), [config.historyUrl]);
+  const [saveLines, setSaveLines] = useState<SaveLine[]>([]);
+  const saver = useMemo(
+    () =>
+      new HistorySaver({
+        bus,
+        historyUrl: config.historyUrl,
+        userId,
+        fetch: (...args) => fetch(...args),
+        onLines: setSaveLines,
+      }),
+    [bus, config.historyUrl, userId],
+  );
   // Detection knobs, adjustable between sessions from the settings panel.
 
   // Fixture recording, ours and off by default: `?record` adds a control that saves the
@@ -123,9 +141,11 @@ export function App() {
       onTurn: (turn) => {
         setMetrics(turn);
         recorder.addTurn(turn);
+        saver.addTurn(turn);
       },
       onEnded: (reason, message) => {
         setTalking(false);
+        saver.end(reason, message);
         // The agent can hang up on its own, in which case the transport button is never
         // pressed — without this the recording of that conversation is simply lost.
         if (reason !== "user") saveRecordingRef.current?.();
@@ -138,7 +158,7 @@ export function App() {
         setEndedBy(reason);
       },
     };
-  }, [bus, transport, recorder]);
+  }, [bus, transport, recorder, saver]);
 
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
@@ -188,6 +208,7 @@ export function App() {
       setEngine(current);
       engineRef.current = current;
       const generation = generationRef.current;
+      saver.start();
       const session = createSession(current, sessionDeps);
       sessionRef.current = session;
       await session.start();
@@ -215,6 +236,19 @@ export function App() {
     [sessionDeps],
   );
 
+  useEffect(() => {
+    const flush = () => saver.flushOnPageHide();
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      // The SDK reports the session's end only after an await, when the saver is already
+      // gone, so the ending is queued here; a conversation that already ended ignores it.
+      saver.end("user");
+      flush();
+      saver.dispose();
+    };
+  }, [saver]);
+
   return (
     <main className="shell">
       <header className="masthead">
@@ -233,6 +267,11 @@ export function App() {
           </span>
           <span className="spacer" />
           <span>window 6s</span>
+          {config.historyUrl && (
+            <a className="settings-toggle" href="?history">
+              history
+            </a>
+          )}
           {/* With no token the gate is open anyway, so the toggle would move nothing. */}
           {!config.offline && (
             <button
@@ -283,6 +322,22 @@ export function App() {
                     : "Step 2 — press it, allow the microphone, then just talk."}
             </span>
           </div>
+
+          {saveLines.map((line) => {
+            const text = saveLineText(line.status);
+            if (text === null) return null;
+            return (
+              <p className="history-line" data-state={line.status.kind} key={line.key} role="status">
+                {text}
+                {line.status.kind === "saved" && (
+                  <>
+                    {" "}
+                    <a href="?history">Open history</a>
+                  </>
+                )}
+              </p>
+            );
+          })}
 
           {recording && (
             <p className="hint">

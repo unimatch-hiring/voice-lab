@@ -12,6 +12,7 @@ Live: https://unimatch-hiring.github.io/voice-lab/
 ```sh
 npm ci
 npm run dev     # http://localhost:5173
+npm run server  # optional, in another terminal: keeps the history of your conversations
 ```
 
 The conversation runs on [ElevenLabs
@@ -59,6 +60,7 @@ page: [docs/deploy.md](docs/deploy.md#where-previews-live).
 - `src/lib/persona.ts` — the agent's role, sent as an override when the session opens
 - `src/scene/` — the scene; reads the event stream only and knows nothing about the pipeline
 - `worker/` — Cloudflare Worker minting short-lived tokens (no audio flows through it)
+- `server/` — local Node server keeping conversation history in SQLite ([history](docs/history.md))
 - `tools/` — sprite builder for the character
 
 More detail, by area: [docs/](docs/). Working on the code: [CLAUDE.md](./CLAUDE.md).

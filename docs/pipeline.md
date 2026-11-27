@@ -37,7 +37,17 @@ durations come from the time between the events, not from anything the SDK repor
 ## Ending
 
 `onDisconnect` reports who ended it — `user`, `agent` or `error`. All three must close the
-open lanes, or a stage stays open forever behind a dead socket.
+open lanes, or a stage stays open forever behind a dead socket. Pressing stop reaches it too:
+in `@elevenlabs/client` 1.17.0 `endSession()` is `endSessionWithDetails({ reason: "user" })`,
+which fires `onDisconnect` once.
+
+## Starting
+
+`onConnect({ conversationId })` becomes a `conversation-start` event carrying the provider's
+conversation id and the agent id from `/agent/token`. In SDK 1.17.0 it is the last step of
+`startSession`, after the connection is up and before any message, so a start that fails on
+the microphone or the token never emits it. Conversation history keys off it
+([history](history.md)). The backup engine has no conversation id and does not emit it.
 
 ## Why not our own pipeline
 
