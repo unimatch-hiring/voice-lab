@@ -3,7 +3,7 @@ import { EventBus } from "./lib/events";
 import { createSession } from "./lib/pipeline/createSession";
 import type { Engine, SessionDeps, VoiceSession } from "./lib/pipeline/session";
 import { BACKUP_ENGINE_NOTICE } from "./lib/engine";
-import { createTransport, WorkerError } from "./lib/transport";
+import { ChildServerError, createTransport, WorkerError } from "./lib/transport";
 import { loadConfig } from "./lib/config";
 import type { TurnMetrics } from "./lib/types";
 import { loadToken, saveToken } from "./lib/tokenStore";
@@ -19,6 +19,7 @@ import "./scene/tokens.css";
  * for a denied microphone ("Permission denied") does not say which permission, or where.
  */
 export function startFailureMessage(e: unknown, engine: Engine = "elevenlabs"): string {
+  if (e instanceof ChildServerError) return e.message;
   const name = e instanceof DOMException ? e.name : "";
   const raw = e instanceof Error ? e.message : String(e);
 
@@ -42,12 +43,14 @@ export function startFailureMessage(e: unknown, engine: Engine = "elevenlabs"): 
   return raw;
 }
 
-export function App() {
+export function App({ childId, recording = false }: { childId?: string; recording?: boolean } = {}) {
   // The token comes from IndexedDB, i.e. asynchronously, so config lives in state.
   // The first render is offline and flips to live mode once the token is read.
   const [storedToken, setStoredToken] = useState("");
   const [tokenReady, setTokenReady] = useState(false);
   const config = useMemo(() => loadConfig(storedToken), [storedToken]);
+  const childServerMissing = Boolean(childId && !config.childServerUrl);
+  const offline = config.offline || childServerMissing;
 
   useEffect(() => {
     let alive = true;
@@ -73,35 +76,35 @@ export function App() {
   const startingRef = useRef(false);
   /** Bumped on teardown, so a start that resolves afterwards knows its session was abandoned. */
   const generationRef = useRef(0);
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
   /** Who ended the last conversation, so the transport row can say so. */
   const [endedBy, setEndedBy] = useState<"user" | "agent" | "error" | null>(null);
-  // Detection knobs, adjustable between sessions from the settings panel.
 
-  // Fixture recording, ours and off by default: `?record` adds a control that saves the
-  // conversation to a JSON file.
-  const recording = useMemo(() => new URLSearchParams(location.search).has("record"), []);
   const recorder = useMemo(() => new Recorder(bus), [bus]);
   const [savedAs, setSavedAs] = useState<string | null>(null);
   // The session is built before the save helper exists, and its `onEnded` needs to call it.
   const saveRecordingRef = useRef<(() => void) | null>(null);
 
-  const transport = useMemo(
-    () => createTransport({ workerUrl: config.workerUrl, vibeToken: config.vibeToken }),
-    [config],
-  );
+  const transport = useMemo(() => createTransport(config), [config]);
+  const [childHeader, setChildHeader] = useState<{ id: string; name: string }>();
+  const childName = childHeader && childHeader.id === childId ? childHeader.name : undefined;
+  useEffect(() => {
+    if (!childId || !config.childServerUrl) return;
+    let alive = true;
+    transport.childProfile(childId)
+      .then(({ displayName: name }) => {
+        if (alive) setChildHeader({ id: childId, name });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [childId, config.childServerUrl, transport]);
 
   // The engine is set per key in the admin page and can be switched mid-session, so it
   // is asked for on load (for the notice) and again before every conversation.
   const [engine, setEngine] = useState<Engine>("elevenlabs");
   useEffect(() => {
-    if (config.offline) return;
+    if (offline) return;
     let alive = true;
     transport
       .engine()
@@ -110,7 +113,7 @@ export function App() {
     return () => {
       alive = false;
     };
-  }, [config, transport]);
+  }, [offline, transport]);
 
   const sessionRef = useRef<VoiceSession | null>(null);
   /** The engine the last start attempt used, so its failure is worded for that engine. */
@@ -120,6 +123,7 @@ export function App() {
     return {
       bus,
       transport,
+      childId,
       onTurn: (turn) => {
         setMetrics(turn);
         recorder.addTurn(turn);
@@ -138,7 +142,7 @@ export function App() {
         setEndedBy(reason);
       },
     };
-  }, [bus, transport, recorder]);
+  }, [bus, transport, recorder, childId]);
 
   // Stable across renders on purpose. The mouth's animation loop depends on this
   // callback, and handing it a fresh arrow every render used to tear the loop down
@@ -176,6 +180,7 @@ export function App() {
     }
     startingRef.current = true;
     setStarting(true);
+    const generation = generationRef.current;
     try {
       setEndedBy(null);
       if (recording) {
@@ -184,10 +189,9 @@ export function App() {
       }
       // An old Worker without the engine route means the default engine, not a failure.
       const current = await transport.engine().catch(() => "elevenlabs" as const);
-      if (!mountedRef.current) return;
+      if (generation !== generationRef.current) return;
       setEngine(current);
       engineRef.current = current;
-      const generation = generationRef.current;
       const session = createSession(current, sessionDeps);
       sessionRef.current = session;
       await session.start();
@@ -196,10 +200,12 @@ export function App() {
         await session.stop();
         return;
       }
-      setTalking(true);
+      setTalking(session.isRunning);
     } catch (e) {
-      setError(startFailureMessage(e, engineRef.current));
-      setTalking(false);
+      if (generation === generationRef.current) {
+        setError(startFailureMessage(e, engineRef.current));
+        setTalking(false);
+      }
     } finally {
       startingRef.current = false;
       setStarting(false);
@@ -218,18 +224,22 @@ export function App() {
   return (
     <main className="shell">
       <header className="masthead">
-        <h1>voice-lab</h1>
-        <p>
-          Start talking and it answers back. Every stage of the pipeline reports the
-          milliseconds it actually took, and the character articulates the reply from the
-          real loudness of the voice you are hearing.
-        </p>
+        <h1>{childName ? `voice-lab · ${childName}` : "voice-lab"}</h1>
+        {childId ? (
+          <p>A voice conversation page for {childName ?? "a child"}.</p>
+        ) : (
+          <p>
+            Start talking and it answers back. Every stage of the pipeline reports the
+            milliseconds it actually took, and the character articulates the reply from the
+            real loudness of the voice you are hearing.
+          </p>
+        )}
       </header>
 
       <section className="panel">
         <div className="panel-head">
-          <span className="mode" data-live={!config.offline}>
-            {config.offline ? "no token" : "live"}
+          <span className="mode" data-live={!offline}>
+            {offline ? (childServerMissing ? "no server" : "no token") : "live"}
           </span>
           <span className="spacer" />
           <span>window 6s</span>
@@ -269,18 +279,20 @@ export function App() {
               className="talk"
               data-talking={talking}
               onClick={toggleConversation}
-              disabled={config.offline || starting}
+              disabled={offline || starting}
             >
               {talking ? "End conversation" : "Start conversation"}
             </button>
             <span className="hint">
-              {config.offline
-                ? "Paste the access token above to start talking."
-                : talking
-                  ? "Listening. Just speak; pauses end your turn."
-                  : endedBy === "agent"
-                    ? "The agent ended the conversation. Start again whenever you like."
-                    : "Step 2 — press it, allow the microphone, then just talk."}
+              {childServerMissing
+                ? "Configure the child profile server to start talking."
+                : offline
+                  ? "Paste the access token above to start talking."
+                  : talking
+                    ? "Listening. Just speak; pauses end your turn."
+                    : endedBy === "agent"
+                      ? "The agent ended the conversation. Start again whenever you like."
+                      : "Step 2 — press it, allow the microphone, then just talk."}
             </span>
           </div>
 
@@ -292,7 +304,7 @@ export function App() {
             </p>
           )}
 
-          <p className="status-line">{error}</p>
+          <p className="status-line" role="alert">{error}</p>
 
           <div className="run">
             <div className="run-left">
@@ -305,16 +317,10 @@ export function App() {
           <StageBreakdown metrics={metrics} />
         </div>
       </section>
-
     </main>
   );
 }
 
-/**
- * Settings, folded away behind the header toggle: the token that unlocks live mode,
- * plus the two audio knobs that decide when a turn ends. Both matter in practice —
- * room noise differs, and a threshold tuned in a quiet room clips words in a loud one.
- */
 function TokenGate({
   token,
   onChange,
@@ -380,8 +386,6 @@ function TokenGate({
           </p>
         </form>
       )}
-
-
     </div>
   );
 }

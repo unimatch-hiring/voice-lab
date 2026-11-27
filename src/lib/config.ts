@@ -1,6 +1,7 @@
 export interface AppConfig {
   workerUrl: string;
   vibeToken: string;
+  childServerUrl: string;
   /** No token: nothing can run. */
   offline: boolean;
 }
@@ -21,5 +22,7 @@ export function loadConfig(storedToken = ""): AppConfig {
   const workerUrl = import.meta.env.VITE_WORKER_URL ?? DEFAULT_WORKER_URL;
   const vibeToken = import.meta.env.VITE_VIBE_TOKEN ?? storedToken;
 
-  return { workerUrl, vibeToken, offline: !workerUrl || !vibeToken };
+  const childServerUrl = import.meta.env.VITE_CHILD_LLM_URL ??
+    (import.meta.env.DEV ? "http://127.0.0.1:8788" : "");
+  return { workerUrl, vibeToken, childServerUrl, offline: !workerUrl || !vibeToken };
 }

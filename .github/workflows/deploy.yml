@@ -60,6 +60,7 @@ jobs:
           # up in the bundle and is visible in the browser — the Worker is protected
           # by its origin list and the token, not by its address being unknown.
           VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
+          VITE_CHILD_LLM_URL: ${{ vars.VITE_CHILD_LLM_URL }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

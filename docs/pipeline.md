@@ -3,9 +3,10 @@
 The conversation runs on [ElevenLabs
 Agents](https://elevenlabs.io/docs/agents-platform/overview) via
 [`@elevenlabs/client`](https://www.npmjs.com/package/@elevenlabs/client) — [SDK
-reference](https://elevenlabs.io/docs/agents-platform/libraries/java-script). We do not own the
-steps; we own their presentation. [`agentSession.ts`](../src/lib/pipeline/agentSession.ts)
-translates SDK events into the stage stream the scene draws.
+reference](https://elevenlabs.io/docs/agents-platform/libraries/java-script).
+[`agentSession.ts`](../src/lib/pipeline/agentSession.ts) translates SDK events into the stage
+stream the scene draws. A child link [changes the prompt](#who-decides-the-role)
+and enables turn reviews.
 
 ## Stage mapping
 
@@ -57,12 +58,24 @@ detector is theirs, playback is theirs.
 
 ## Who decides the role
 
-The prompt the agent answers with is not the one configured in the ElevenLabs dashboard:
-`src/lib/persona.ts` overrides it in the handshake (`conversation_initiation_client_data`).
-Two consequences. It applies **once, at session start** — a running conversation keeps the
-role it opened with, so switching roles means a new session. And the agent must permit the
-override: with it disallowed the server closes the connection instead of ignoring the
-field, which reaches the page as a dropped conversation rather than an error about prompts.
+Demo and child links use the same interview key and engine selection. The Worker
+returns the voice credential for either engine. Demo calls use `SYSTEM_PROMPT` from
+`src/lib/persona.ts`. For `?child=<id>`, the profile server builds the prompt from the
+current profile and topics. The browser fetches it via `GET /profile?childId=<id>` and
+passes it through the ElevenLabs system prompt override or Deepgram's `Settings` message.
+
+The ElevenLabs agent selected by the Worker must allow the system prompt override.
+Enable `user_transcript`, `agent_response`, `interruption`,
+`agent_response_correction`, and `audio` for the browser pipeline.
+[ElevenLabs overrides](https://elevenlabs.io/docs/eleven-agents/customization/personalization/overrides)
+
+The profile server records the rules version via `POST /api/child/conversations`.
+Child calls send a window of up to ten turns to `POST /api/child/turn-reviews`.
+The browser pairs final transcripts with playback events. It submits a turn when
+playback settles, when an interrupted reply is corrected or times out, or when
+the call ends. If playback was unfinished, it reports the child transcript and
+any matching correction. A separate model reviews the latest turn while voice
+generation proceeds independently.
 
 ## Backup engine: Deepgram
 

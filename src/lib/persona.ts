@@ -1,5 +1,5 @@
 /**
- * The agent's role, sent from here at session start.
+ * The demo agent's role, sent from here at session start.
  *
  * The prompt configured on the ElevenLabs agent is not reachable from this code, so an
  * override is the only way the role is decided here. It applies once, when the session

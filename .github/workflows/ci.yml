@@ -27,3 +27,4 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
+      - run: npm --prefix server test

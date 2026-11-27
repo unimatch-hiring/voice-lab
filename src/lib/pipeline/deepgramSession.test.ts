@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { ChildProfile, TurnReview } from "../../../shared/child";
 import { DEEPGRAM_AGENT_URL, DeepgramSession, type ClientFunction } from "./deepgramSession";
 import type { DeepgramAudio } from "./deepgramAudio";
 import { SYSTEM_PROMPT } from "../persona";
@@ -97,14 +98,34 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-interface HarnessOptions {
-  functions?: ClientFunction[];
+const childId = "b92223d2-340e-4152-91bd-09e209849eea";
+const conversationId = "a2d1b112-14f7-45da-b76e-a44106fb26e1";
+const profile: ChildProfile = {
+  displayName: "Maya",
+  prompt: "Use dinosaurs as examples.\n\nReply in English.\n",
+  rulesVersion: 2,
+};
+
+function childTransport() {
+  return {
+    childProfile: vi.fn(async () => profile),
+    deepgramToken: vi.fn(async () => ({ token: "jwt-1" })),
+    startChildConversation: vi.fn(async () => ({ conversationId })),
+    reviewTurn: vi.fn<(review: TurnReview) => Promise<void>>(async () => {}),
+    endChildConversation: vi.fn(async () => {}),
+  };
 }
 
-async function harness({ functions }: HarnessOptions = {}) {
+interface HarnessOptions {
+  functions?: ClientFunction[];
+  child?: ReturnType<typeof childTransport>;
+}
+
+function setup({ functions, child }: HarnessOptions = {}) {
   const bus = new EventBus();
   const events: PipelineEvent[] = [];
   bus.on((e) => events.push(e));
@@ -114,14 +135,20 @@ async function harness({ functions }: HarnessOptions = {}) {
 
   const session = new DeepgramSession({
     bus,
-    transport: { deepgramToken: async () => ({ token: "jwt-1" }) } as never,
+    childId: child ? childId : undefined,
+    transport: (child ?? { deepgramToken: async () => ({ token: "jwt-1" }) }) as never,
     onTurn: (m) => turns.push(m),
     onEnded: (reason, message) => ended.push({ reason, message }),
     functions,
     audio: () => audio as unknown as DeepgramAudio,
   });
 
-  const started = session.start();
+  return { session, audio, events, turns, ended };
+}
+
+async function harness(options?: HarnessOptions) {
+  const run = setup(options);
+  const started = run.session.start();
   // Microphone and token are awaited before the socket exists.
   await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
   const socket = FakeSocket.last!;
@@ -129,7 +156,7 @@ async function harness({ functions }: HarnessOptions = {}) {
   socket.emit({ type: "SettingsApplied" });
   await started;
 
-  return { session, socket, audio, events, turns, ended };
+  return { ...run, socket };
 }
 
 const lanes = (events: PipelineEvent[], type: "stage-start" | "stage-end") =>
@@ -182,6 +209,97 @@ test("Settings carry the role, the client functions and English-only managed mod
   expect(settings.agent.think.functions[0].endpoint, "no endpoint means client-side").toBeUndefined();
   expect(settings.agent.speak.provider.model).toMatch(/-en$/);
   expect(settings.agent.listen.provider.language).toBe("en");
+});
+
+test("a child session uses the Worker grant and passes the server prompt verbatim in Settings", async () => {
+  const transport = childTransport();
+  const { session, socket } = await harness({ child: transport });
+
+  expect(transport.childProfile).toHaveBeenCalledExactlyOnceWith(childId);
+  expect(transport.deepgramToken).toHaveBeenCalledExactlyOnceWith();
+  expect(transport.startChildConversation).toHaveBeenCalledExactlyOnceWith(childId, 2);
+  expect(socket.protocols).toEqual(["bearer", "jwt-1"]);
+  expect(socket.json()[0].agent.think.prompt).toBe(profile.prompt);
+
+  await session.stop();
+  expect(transport.endChildConversation).toHaveBeenCalledExactlyOnceWith(childId, conversationId, "ended");
+});
+
+test("a child turn records the played reply and omits an interrupted reply", async () => {
+  const transport = childTransport();
+  const { session, socket, audio } = await harness({ child: transport });
+  vi.useFakeTimers();
+
+  socket.emit({ type: "ConversationText", role: "user", content: "Tell me about dinosaurs." });
+  socket.emit({ type: "ConversationText", role: "assistant", content: "Some dinosaurs had feathers." });
+  socket.audio();
+  socket.emit({ type: "AgentAudioDone" });
+  vi.advanceTimersByTime(1000);
+  expect(transport.reviewTurn).not.toHaveBeenCalled();
+
+  audio.drain();
+  vi.advanceTimersByTime(1000);
+  const played = { input: "Tell me about dinosaurs.", output: "Some dinosaurs had feathers." };
+  expect(transport.reviewTurn).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    childId, conversationId, turns: [played],
+  }));
+
+  socket.emit({ type: "ConversationText", role: "user", content: "How big were they?" });
+  socket.emit({ type: "ConversationText", role: "assistant", content: "A few were as small as a chicken." });
+  socket.audio();
+  socket.emit({ type: "UserStartedSpeaking" });
+  socket.emit({ type: "AgentAudioDone" });
+  vi.advanceTimersByTime(1000);
+  expect(transport.reviewTurn).toHaveBeenCalledTimes(2);
+  expect(transport.reviewTurn.mock.lastCall?.[0].turns).toEqual([played, { input: "How big were they?", output: null }]);
+
+  await session.stop();
+});
+
+test("a failed child profile load leaves the microphone off and the Worker untouched", async () => {
+  const transport = childTransport();
+  transport.childProfile.mockRejectedValueOnce(new Error("Profile unavailable"));
+  const { session, audio } = setup({ child: transport });
+
+  await expect(session.start()).rejects.toThrow("Profile unavailable");
+  expect(audio.start).not.toHaveBeenCalled();
+  expect(transport.deepgramToken).not.toHaveBeenCalled();
+});
+
+test("stopping during child registration closes that record without opening a socket", async () => {
+  const transport = childTransport();
+  let register!: (value: { conversationId: string }) => void;
+  transport.startChildConversation.mockReturnValueOnce(new Promise((resolve) => {
+    register = resolve;
+  }));
+  const { session, audio } = setup({ child: transport });
+  const started = session.start();
+  await vi.waitFor(() => expect(transport.startChildConversation).toHaveBeenCalled());
+
+  await session.stop();
+  register({ conversationId });
+  await vi.waitFor(() => {
+    expect(transport.endChildConversation).toHaveBeenCalledExactlyOnceWith(childId, conversationId, "ended");
+  });
+  await started;
+
+  expect(FakeSocket.last).toBeNull();
+  expect(audio.closed).toBe(true);
+});
+
+test("stopping during the child handshake releases the microphone and resolves start", async () => {
+  const transport = childTransport();
+  const { session, audio } = setup({ child: transport });
+  const started = session.start();
+  await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
+
+  await session.stop();
+  await started;
+
+  expect(session.isRunning).toBe(false);
+  expect(FakeSocket.last?.closedWith).toBe(1000);
+  expect(audio.closed).toBe(true);
+  expect(transport.endChildConversation).toHaveBeenCalledExactlyOnceWith(childId, conversationId, "ended");
 });
 
 test("microphone audio waits for SettingsApplied", async () => {
@@ -394,15 +512,9 @@ test("stopping closes the socket and the microphone and reports the user", async
   expect(ended).toEqual([{ reason: "user", message: undefined }]);
 });
 
-test("a socket closed during the handshake fails start and releases the microphone", async () => {
-  const audio = fakeAudio();
-  const session = new DeepgramSession({
-    bus: new EventBus(),
-    transport: { deepgramToken: async () => ({ token: "jwt-1" }) } as never,
-    onTurn: () => {},
-    onEnded: () => {},
-    audio: () => audio as unknown as DeepgramAudio,
-  });
+test.each([false, true])("a socket closed during the handshake releases the microphone (child=%s)", async (child) => {
+  const transport = childTransport();
+  const { session, audio } = setup({ child: child ? transport : undefined });
   const started = session.start();
   await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
   FakeSocket.last!.drop(1008, "invalid token");
@@ -410,6 +522,9 @@ test("a socket closed during the handshake fails start and releases the micropho
   await expect(started).rejects.toThrow(/invalid token/);
   expect(audio.closed).toBe(true);
   expect(session.isRunning).toBe(false);
+  if (child) {
+    expect(transport.endChildConversation).toHaveBeenCalledExactlyOnceWith(childId, conversationId, "failed");
+  }
 });
 
 test("a denied microphone fails before a token is spent", async () => {

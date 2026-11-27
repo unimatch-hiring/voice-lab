@@ -14,9 +14,14 @@ npm ci
 npm run dev     # http://localhost:5173
 ```
 
-The conversation runs on [ElevenLabs
-Agents](https://elevenlabs.io/docs/agents-platform/overview), so it needs a deployed Worker
-(`worker/`) to mint session tokens and a client token to reach it.
+Calls use an interview key to get session credentials from the deployed Worker (`worker/`).
+For child calls, also start the [profile server](#parent-control-server). The browser uses
+the prompt from that server and submits turns for review.
+
+With the server running, open [Parent control](http://localhost:5173/voice-lab/?parent=local-parent)
+to create child profiles and assign topics. Copy the `?child=<id>` link shown on each
+profile to open a child call. Profile management works without a model key.
+See [how Parent control works](docs/parent-control.md).
 
 `VITE_WORKER_URL` is a repository variable and ends up in the bundle: the Worker's address
 is not a secret, access is gated by its origin list and by the token. The token itself is
@@ -30,6 +35,20 @@ a rebuild. For local runs a build-time variable also works:
 ```sh
 VITE_VIBE_TOKEN=<token> npm run dev
 ```
+
+### Parent control server
+
+Use Node.js 24 and run these commands from the checkout root.
+
+```sh
+npm --prefix server ci
+npm --prefix server run db:init
+npm --prefix server start
+```
+
+The init command creates `server/.data/voice-lab.sqlite`. The server runs the same
+initialization on startup and listens on `http://127.0.0.1:8788` by default. See the
+[server README](server/README.md) for `DATABASE_PATH` and other settings.
 
 ## Looking at a branch
 
@@ -56,7 +75,9 @@ page: [docs/deploy.md](docs/deploy.md#where-previews-live).
 
 - `src/lib/pipeline/` — the conversation and the stage stream it emits
 - `src/lib/` — transport, config, token storage, the mouth's signal path
-- `src/lib/persona.ts` — the agent's role, sent as an override when the session opens
+- `server/src/` — child profiles and prompts, turn reviews, and alerts
+- `shared/` — the profile contract, local parent ID, and request limits shared with the server
+- `src/lib/persona.ts` — demo session prompt
 - `src/scene/` — the scene; reads the event stream only and knows nothing about the pipeline
 - `worker/` — Cloudflare Worker minting short-lived tokens (no audio flows through it)
 - `tools/` — sprite builder for the character

@@ -4,6 +4,7 @@ import { SYSTEM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
 import type { SessionDeps, VoiceSession } from "./session";
+import { openChildReview } from "./childReview";
 
 export type AgentSessionDeps = SessionDeps;
 
@@ -27,6 +28,7 @@ const FROZEN_MS = 250;
 export class AgentSession implements VoiceSession {
   private conversation: Awaited<ReturnType<typeof Conversation.startSession>> | null = null;
   private running = false;
+  private closeCall: ((status: "ended" | "failed") => void) | undefined;
 
   /** When the current stage opened, so its duration can be reported on close. */
   private stageAt = 0;
@@ -87,16 +89,35 @@ export class AgentSession implements VoiceSession {
   async start(): Promise<void> {
     if (this.running) return;
 
-    const { token } = await this.deps.transport.agentToken();
+    const { childId, transport } = this.deps;
+    let reviews: Awaited<ReturnType<typeof openChildReview>> | undefined;
+    let closed = false;
+    const closeCall = (status: "ended" | "failed") => {
+      if (closed) return;
+      closed = true;
+      reviews?.close(status);
+    };
+    this.closeCall = closeCall;
+
+    const profile = childId ? await transport.childProfile(childId) : undefined;
+    if (closed) return;
+    const { token } = await transport.agentToken();
+    if (closed) return;
+    if (childId && profile) {
+      reviews = await openChildReview(transport, childId, profile.rulesVersion);
+      if (closed) {
+        reviews.close("ended");
+        return;
+      }
+    }
     this.resetTurn();
 
-    this.conversation = await Conversation.startSession({
+    const conversation = await Conversation.startSession({
       conversationToken: token,
-
-      // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      overrides: { agent: { prompt: { prompt: profile?.prompt ?? SYSTEM_PROMPT } } },
 
       onModeChange: ({ mode }) => {
+        reviews?.mode(mode);
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
         // stage has to be bracketed from other events (see onMessage / onAudio).
         const next: StageName | null = mode === "listening" ? "capture" : "playback";
@@ -122,8 +143,9 @@ export class AgentSession implements VoiceSession {
         this.openLane("stt", performance.now());
       },
 
-      onMessage: ({ message, source }) => {
+      onMessage: ({ message, source, event_id }) => {
         if (source === "user") {
+          reviews?.input(message, event_id);
           const at = performance.now();
           this.closeLane("stt", at);
           // Recognition is done, so the model is now working: the lane runs until audio
@@ -138,13 +160,16 @@ export class AgentSession implements VoiceSession {
 
         // `onAgentChatResponsePart` streams the reply earlier but is experimental and does
         // not always fire, so this is the source of record.
+        reviews?.output(message, event_id);
         this.metrics.ttsChars += message.length;
-        if (this.streamedReply.trim() === message.trim()) {
-          this.streamedReply = "";
-          return;
-        }
+        const matchesStream = this.streamedReply.trim() === message.trim();
         this.streamedReply = "";
-        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
+        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now(), matchesStream });
+      },
+
+      onInterruption: ({ event_id }) => reviews?.interrupt(event_id),
+      onAgentResponseCorrection: ({ event_id, original_agent_response, corrected_agent_response }) => {
+        reviews?.correct(event_id, original_agent_response, corrected_agent_response);
       },
 
       onAgentChatResponsePart: (part) => {
@@ -162,6 +187,7 @@ export class AgentSession implements VoiceSession {
       },
 
       onDisconnect: (details) => {
+        closeCall(details.reason === "error" ? "failed" : "ended");
         this.running = false;
         // The mouth reads through `conversation`, and the SDK keeps answering after
         // the socket closes — with the last thing it played. Dropping the handle
@@ -170,10 +196,7 @@ export class AgentSession implements VoiceSession {
         this.conversation = null;
         this.speaking = false;
         this.closeAllLanes(performance.now());
-        this.deps.onEnded(
-          details.reason,
-          details.reason === "error" ? details.message : undefined,
-        );
+        this.deps.onEnded(details.reason, details.reason === "error" ? details.message : undefined);
       },
 
       onError: (message) => {
@@ -184,8 +207,16 @@ export class AgentSession implements VoiceSession {
           message,
         });
       },
+    }).catch((error: unknown) => {
+      closeCall("failed");
+      throw error;
     });
 
+    if (closed) {
+      await conversation.endSession().catch(() => undefined);
+      return;
+    }
+    this.conversation = conversation;
     this.running = true;
   }
 
@@ -255,6 +286,8 @@ export class AgentSession implements VoiceSession {
     this.closeAllLanes(performance.now());
     const conversation = this.conversation;
     this.conversation = null;
+    this.closeCall?.("ended");
+    this.closeCall = undefined;
     await conversation?.endSession().catch(() => undefined);
   }
 }
