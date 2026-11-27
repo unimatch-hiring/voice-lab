@@ -1,12 +1,28 @@
 # Deploy
 
-Two independent pieces.
+GitHub Actions deploys the frontend and the token Worker separately. The development-only
+[profile server](../server/README.md) is an independent service.
 
 ## Frontend — GitHub Pages
 
 [`deploy.yml`](../.github/workflows/deploy.yml) builds and publishes on push to `main`.
 `VITE_WORKER_URL` comes from a repository variable: the Worker's address is not a secret,
 it is gated by its origin list and by the client token.
+
+GitHub Pages serves static files without application rewrites. A path without a matching
+file returns HTTP 404 even when a custom `404.html` renders a page. Every view therefore
+loads the same `index.html` under the build's base URL. Append `?child=<id>` to open a
+child call, `?parent=local-parent` for profiles, or `?alerts` for alerts. `?admin`, `?bench`,
+and `?record` also use the base URL. See [Parent control](parent-control.md#accounts-and-links).
+
+To enable Parent Control on GitHub Pages, set the repository variable
+`VITE_CHILD_LLM_URL` to the HTTPS origin of the profile server. Add the Pages origin
+to `PARENT_CONTROL_ORIGINS` for profiles and alerts and to `CHILD_VOICE_ORIGINS` for
+child calls. Child calls use the same Worker and interview key as the demo. Keep the
+[profile server private](parent-control.md#accounts-and-links).
+
+Vite dev defaults to `http://127.0.0.1:8788`. To test Parent Control in `vite preview`,
+set `VITE_CHILD_LLM_URL` before building, since Vite embeds the value in the build.
 
 `VITE_VIBE_TOKEN` is deliberately absent from the published build — it spends a paid quota.
 Live mode is unlocked by pasting the token into the page, where it is kept in IndexedDB
@@ -71,6 +87,9 @@ The workflows push there with a deploy key (`PREVIEWS_DEPLOY_KEY`) that can writ
 one repository and nothing else. Preview builds also set `VITE_PREVIEW=1`, which turns
 `?admin` into a notice; that is a convenience, since a pull request can rewrite the code
 that reads it.
+
+Preview links use the same query parameters on each preview's own base path. The preview
+workflows build without a profile server URL.
 
 ## Branch previews
 

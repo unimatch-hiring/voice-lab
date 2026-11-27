@@ -19,10 +19,9 @@ neither takes long enough to skip.
 
 ## The conversation cannot be run locally without a key
 
-A live turn needs the deployed Worker and a token pasted into the page — no key, no
-conversation, and nothing about the pipeline can be observed by hand. **So behaviour here is
-proven by tests, not by talking to it.** `agentSession.test.ts` drives the SDK callbacks
-directly; that is the fast way to check anything event-shaped.
+A call needs the deployed Worker and an interview key pasted into the page. A child call
+also needs the [profile server](server/README.md). **Verify pipeline behaviour with tests.**
+`agentSession.test.ts` drives the SDK callbacks directly.
 
 `?bench` replays recorded speech through the mouth, and `?record` writes those fixtures.
 

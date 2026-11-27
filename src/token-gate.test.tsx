@@ -1,7 +1,7 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { App, startFailureMessage } from "./App";
-import { WorkerError } from "./lib/transport";
+import { ChildServerError, WorkerError } from "./lib/transport";
 
 // jsdom has no IndexedDB, so the store is faked.
 let stored = "";
@@ -34,6 +34,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 // Regression: the field sat behind the settings toggle, so a first-time visitor saw
@@ -118,6 +119,19 @@ test("a rejected token points back at settings", () => {
   expect(startFailureMessage(new Error("agent token failed: 401"))).toMatch(/paste it again/i);
 });
 
+test("a child link uses the same interview key gate as the demo", async () => {
+  vi.stubEnv("VITE_VIBE_TOKEN", undefined);
+  vi.stubEnv("VITE_CHILD_LLM_URL", "http://127.0.0.1:8788");
+  render(<App childId="a789682b-f6cc-4687-bd23-0b4839927eea" />);
+
+  const input = await screen.findByLabelText(/access token/i);
+  const start = screen.getByRole("button", { name: /start conversation/i });
+  expect(start.hasAttribute("disabled")).toBe(true);
+  fireEvent.change(input, { target: { value: "vibe_test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+});
+
 test("an unrecognised failure is passed through rather than swallowed", () => {
   expect(startFailureMessage(new Error("websocket closed unexpectedly"))).toBe(
     "websocket closed unexpectedly",
@@ -157,12 +171,28 @@ describe("start failures on the backup engine", () => {
     startFails = new WorkerError("/deepgram-token", 502);
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start conversation/i }));
+    await screen.findByText(/backup engine: english only/i);
+    fireEvent.click(screen.getByRole("button", { name: /start conversation/i }));
 
     expect(
       await screen.findByText("Backup engine is unavailable right now, try again later."),
     ).toBeTruthy();
     expect(screen.queryByText(/access token was rejected/i)).toBeNull();
+  });
+
+  test("a child profile failure is shown separately from a Deepgram outage", async () => {
+    stored = "vibe_test";
+    vi.stubEnv("VITE_CHILD_LLM_URL", "http://127.0.0.1:8788");
+    vi.mocked(fetch).mockImplementation(async (url) => String(url).endsWith("/engine")
+      ? Response.json({ engine: "deepgram" }) : new Response(null, { status: 404 }));
+    const message = "This child profile was not found. Ask for a new link.";
+    startFails = new ChildServerError(message);
+    render(<App childId="a789682b-f6cc-4687-bd23-0b4839927eea" />);
+
+    await screen.findByText(/backup engine: english only/i);
+    fireEvent.click(screen.getByRole("button", { name: /start conversation/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(message));
   });
 
   test("ElevenLabs keeps its wording", () => {

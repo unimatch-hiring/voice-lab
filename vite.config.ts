@@ -5,6 +5,8 @@ import react from "@vitejs/plugin-react";
 // level deeper, so the path comes from the build rather than being fixed here.
 export default defineConfig({
   base: process.env.BASE_PATH ?? "/voice-lab/",
+  // A missing path must also 404 locally.
+  appType: "mpa",
   server: {
     fs: { deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "**/server/**"] },
   },

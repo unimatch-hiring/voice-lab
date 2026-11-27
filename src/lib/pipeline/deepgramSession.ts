@@ -2,6 +2,7 @@ import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
+import { openChildReview } from "./childReview";
 import { createBrowserAudio, OUTPUT_RATE, type DeepgramAudio } from "./deepgramAudio";
 import type { SessionDeps, VoiceSession } from "./session";
 
@@ -56,9 +57,12 @@ type ServerMessage =
 export class DeepgramSession implements VoiceSession {
   private socket: WebSocket | null = null;
   private audio: DeepgramAudio | null = null;
+  private starting = false;
   private running = false;
   private stopping = false;
   private ready = false;
+  private settleHandshake?: () => void;
+  private review?: Awaited<ReturnType<typeof openChildReview>>;
 
   private stageAt = 0;
   private stage: StageName | null = null;
@@ -88,27 +92,47 @@ export class DeepgramSession implements VoiceSession {
   }
 
   async start(): Promise<void> {
-    if (this.running) return;
+    if (this.running || this.starting) return;
+    this.starting = true;
     this.stopping = false;
     this.resetTurn();
 
-    // Microphone first: a denied permission should fail before a token is spent.
-    const audio = (this.deps.audio ?? createBrowserAudio)();
-    this.audio = audio;
-    audio.onDrained = this.onDrained;
+    const { childId, transport } = this.deps;
     try {
-      await audio.start((pcm, rms) => {
+      const profile = childId ? await transport.childProfile(childId) : undefined;
+      if (this.stopping) return;
+
+      // A denied microphone permission should fail before a token is spent.
+      const audio = (this.deps.audio ?? createBrowserAudio)();
+      this.audio = audio;
+      audio.onDrained = this.onDrained;
+      const startingAudio = audio.start((pcm, rms) => {
         if (!this.ready) return;
         this.socket?.send(pcm);
         this.deps.bus.emit({ type: "audio-level", rms, at: performance.now() });
       });
-      const { token } = await this.deps.transport.deepgramToken();
-      await this.connect(token, audio);
+      // A permission prompt can resolve after stop() tried to close the microphone.
+      await startingAudio.finally(() => this.stopping ? audio.close() : undefined);
+      if (this.stopping) return;
+
+      const { token } = await transport.deepgramToken();
+      if (this.stopping) return;
+      if (childId && profile) {
+        const review = await openChildReview(transport, childId, profile.rulesVersion);
+        if (this.stopping) {
+          review.close("ended");
+          return;
+        }
+        this.review = review;
+      }
+      await this.connect(token, audio.inputRate, profile?.prompt ?? SYSTEM_PROMPT);
+      this.running = this.ready;
     } catch (e) {
-      await this.teardown();
+      await this.teardown("failed");
       throw e;
+    } finally {
+      this.starting = false;
     }
-    this.running = true;
   }
 
   /** InjectUserMessage. */
@@ -129,16 +153,17 @@ export class DeepgramSession implements VoiceSession {
     const wasRunning = this.running;
     this.stopping = true;
     this.running = false;
-    await this.teardown();
+    await this.teardown("ended");
     if (wasRunning) this.deps.onEnded("user");
   }
 
-  private connect(token: string, audio: DeepgramAudio): Promise<void> {
+  private connect(token: string, inputRate: number, prompt: string): Promise<void> {
     return new Promise((resolve, reject) => {
       // Browsers cannot set Authorization on a WebSocket; Deepgram takes it as a subprotocol.
       const socket = new WebSocket(DEEPGRAM_AGENT_URL, ["bearer", token]);
       socket.binaryType = "arraybuffer";
       this.socket = socket;
+      this.settleHandshake = resolve;
 
       socket.onmessage = (e: MessageEvent) => {
         if (typeof e.data !== "string") {
@@ -147,8 +172,9 @@ export class DeepgramSession implements VoiceSession {
         }
         const msg = JSON.parse(e.data) as ServerMessage;
         if (msg.type === "Welcome") {
-          this.send(this.settings(audio.inputRate));
+          this.send(this.settings(inputRate, prompt));
         } else if (msg.type === "SettingsApplied") {
+          this.settleHandshake = undefined;
           this.ready = true;
           this.openStage("capture");
           resolve();
@@ -168,7 +194,7 @@ export class DeepgramSession implements VoiceSession {
     });
   }
 
-  private settings(inputRate: number) {
+  private settings(inputRate: number, prompt: string) {
     const functions = this.deps.functions?.map(({ name, description, parameters }) => ({
       name,
       description,
@@ -184,7 +210,7 @@ export class DeepgramSession implements VoiceSession {
         listen: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.listen, language: "en" } },
         think: {
           provider: { type: "open_ai", model: DEEPGRAM_MODELS.think },
-          prompt: SYSTEM_PROMPT,
+          prompt,
           ...(functions?.length ? { functions } : {}),
         },
         speak: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.speak } },
@@ -196,6 +222,7 @@ export class DeepgramSession implements VoiceSession {
     if (!this.speaking) {
       const at = performance.now();
       this.speaking = true;
+      this.review?.mode("speaking");
       this.replySent = false;
       this.closeLane("llm", at);
       this.openLane("tts", at);
@@ -210,6 +237,7 @@ export class DeepgramSession implements VoiceSession {
       case "UserStartedSpeaking":
         // Barge-in: what is still queued would talk over the user.
         if (this.speaking) {
+          this.review?.interrupt();
           this.audio?.flush();
           this.speaking = false;
           this.closeLane("tts", at);
@@ -221,11 +249,13 @@ export class DeepgramSession implements VoiceSession {
       case "ConversationText": {
         const { role, content } = msg as { role: string; content: string };
         if (role === "user") {
+          this.review?.input(content);
           this.closeLane("stt", at);
           this.openLane("llm", at);
           this.deps.bus.emit({ type: "stt-result", result: { text: content, words: [] } });
           return;
         }
+        this.review?.output(content);
         this.metrics.ttsChars += content.length;
         this.deps.bus.emit({ type: "agent-reply", text: content, at });
         if (this.injection?.text === content.trim()) this.settleInjection(true);
@@ -286,6 +316,7 @@ export class DeepgramSession implements VoiceSession {
   };
 
   private endReply(): void {
+    this.review?.mode("listening");
     this.speaking = false;
     this.replySent = false;
     this.openStage("capture");
@@ -304,13 +335,17 @@ export class DeepgramSession implements VoiceSession {
   private onClosed(reason: "agent" | "error", message: string): void {
     const wasRunning = this.running;
     this.running = false;
-    void this.teardown();
+    void this.teardown(reason === "error" ? "failed" : "ended");
     if (wasRunning && !this.stopping) {
       this.deps.onEnded(reason, reason === "error" ? message : undefined);
     }
   }
 
-  private async teardown(): Promise<void> {
+  private async teardown(status: "ended" | "failed"): Promise<void> {
+    this.settleHandshake?.();
+    this.settleHandshake = undefined;
+    this.review?.close(status);
+    this.review = undefined;
     this.ready = false;
     this.speaking = false;
     this.settleInjection(false);

@@ -8,6 +8,7 @@ export type Engine = "elevenlabs" | "deepgram";
 export interface SessionDeps {
   bus: EventBus;
   transport: Transport;
+  childId?: string;
   /** Called when a turn completes, with what each stage cost. */
   onTurn: (metrics: TurnMetrics) => void;
   /**
