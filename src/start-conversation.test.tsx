@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { EMPTY_SETTINGS, type ParentSettings } from "./lib/parental/types";
+import type { SessionDeps } from "./lib/pipeline/session";
 
 vi.mock("./lib/tokenStore", () => ({
   loadToken: () => Promise.resolve("vibe_test"),
@@ -12,13 +14,15 @@ interface FakeSession {
   isRunning: boolean;
   finishStart: () => void;
   stop: ReturnType<typeof vi.fn>;
+  deps: SessionDeps;
 }
 const created: FakeSession[] = [];
 
 vi.mock("./lib/pipeline/createSession", () => ({
-  createSession: () => {
+  createSession: (_engine: string, deps: SessionDeps) => {
     let finishStart = () => {};
     const session = {
+      deps,
       isRunning: false,
       finishStart: () => finishStart(),
       mouthSpectrum: () => null,
@@ -38,8 +42,16 @@ vi.mock("./lib/pipeline/createSession", () => ({
   },
 }));
 
+const parent = vi.hoisted(() => ({
+  getSettings: vi.fn<() => Promise<ParentSettings>>(),
+  reviewFlag: vi.fn(async () => ({ flagged: true })),
+  appendTranscript: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock("./lib/parental/parentApi", () => ({ createParentApi: () => parent }));
+
 beforeEach(() => {
   created.length = 0;
+  parent.getSettings.mockResolvedValue(EMPTY_SETTINGS);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
 });
 
@@ -86,4 +98,67 @@ test("a session still starting when the page goes away is closed once it opens",
   await act(async () => created[0].finishStart());
 
   expect(created[0].isRunning).toBe(false);
+});
+
+test("the conversation opens with what the parent set", async () => {
+  parent.getSettings.mockResolvedValue({
+    ...EMPTY_SETTINGS,
+    childProfile: "Masha, 7, loves drawing",
+    blockedTopics: "horror films",
+  });
+  render(<App />);
+  fireEvent.click(await startButton());
+
+  await waitFor(() => expect(created).toHaveLength(1));
+  expect(created[0].deps.prompt).toContain("Masha, 7, loves drawing");
+  expect(created[0].deps.prompt).toContain("horror films");
+});
+
+test("without the parent's settings no conversation starts", async () => {
+  parent.getSettings.mockRejectedValue(new Error("server down"));
+  render(<App />);
+  fireEvent.click(await startButton());
+
+  expect(await screen.findByText(/settings could not be loaded/i)).toBeTruthy();
+  expect(created).toHaveLength(0);
+});
+
+test("a second conversation does not send each message twice", async () => {
+  render(<App />);
+  const button = await startButton();
+  fireEvent.click(button);
+  await waitFor(() => expect(created).toHaveLength(1));
+  await act(async () => created[0].finishStart());
+  fireEvent.click(await screen.findByRole("button", { name: /end conversation/i }));
+  fireEvent.click(await startButton());
+  await waitFor(() => expect(created).toHaveLength(2));
+  await act(async () => created[1].finishStart());
+  parent.reviewFlag.mockClear();
+
+  created[1].deps.bus.emit({ type: "stt-result", result: { text: "Мне страшно", words: [] } });
+  created[1].deps.bus.emit({ type: "agent-reply", text: "Я рядом.", at: 0 });
+  created[1].deps.bus.emit({ type: "turn-start", at: 0 });
+
+  expect(parent.reviewFlag).toHaveBeenCalledOnce();
+});
+
+test("every child message during the conversation is sent for review", async () => {
+  parent.getSettings.mockResolvedValue(EMPTY_SETTINGS);
+  render(<App />);
+  fireEvent.click(await startButton());
+  await waitFor(() => expect(created).toHaveLength(1));
+
+  created[0].deps.bus.emit({
+    type: "stt-result",
+    result: { text: "Дядя сказал, что это наша тайна", words: [] },
+  });
+  created[0].deps.bus.emit({ type: "agent-reply", text: "Расскажешь подробнее?", at: 0 });
+  created[0].deps.bus.emit({ type: "turn-start", at: 0 });
+
+  expect(parent.reviewFlag).toHaveBeenCalledWith(
+    expect.objectContaining({
+      text: "Дядя сказал, что это наша тайна",
+      agentReply: "Расскажешь подробнее?",
+    }),
+  );
 });

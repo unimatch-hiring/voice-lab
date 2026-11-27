@@ -2,6 +2,7 @@ import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { App, startFailureMessage } from "./App";
 import { WorkerError } from "./lib/transport";
+import { EMPTY_SETTINGS } from "./lib/parental/types";
 
 // jsdom has no IndexedDB, so the store is faked.
 let stored = "";
@@ -21,6 +22,14 @@ vi.mock("./lib/pipeline/createSession", () => ({
     mouthSpectrum: () => null,
     start: () => (startFails ? Promise.reject(startFails) : Promise.resolve()),
     stop: () => Promise.resolve(),
+  }),
+}));
+
+// The parental server is not under test here; a start always finds the parent's settings.
+vi.mock("./lib/parental/parentApi", () => ({
+  createParentApi: () => ({
+    getSettings: () => Promise.resolve(EMPTY_SETTINGS),
+    appendTranscript: () => Promise.resolve(),
   }),
 }));
 
@@ -200,4 +209,11 @@ describe("the backup engine notice", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByText(/backup engine/i)).toBeNull();
   });
+});
+
+test("the parent page is one link away from the assistant", async () => {
+  render(<App />);
+
+  const link = await screen.findByRole("link", { name: /for parents/i });
+  expect(link.getAttribute("href")).toBe("?parent");
 });

@@ -1,0 +1,101 @@
+/* Parent route only; borrows the variables from tokens.css. */
+
+.parent-shell {
+  max-width: 760px;
+}
+
+.parent-form {
+  display: grid;
+  gap: 16px;
+}
+
+.parent-field {
+  display: grid;
+  gap: 6px;
+}
+
+.parent-field span {
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rack-dim);
+}
+
+.parent-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font: 14px/1.4 var(--sans);
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+  resize: vertical;
+}
+
+.parent-field textarea:focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: 1px;
+}
+
+.parent-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.parent-error {
+  margin: 0;
+  font: 13px/1.4 var(--sans);
+  color: var(--fail);
+}
+
+.parent-flags {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.parent-flag {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--fail);
+  border-radius: var(--radius);
+}
+
+.parent-flag[data-status="unverified"] {
+  border-style: dashed;
+}
+
+.parent-flag-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font: 600 12px/1.2 var(--mono);
+  color: var(--rack-dim);
+}
+
+.parent-flag-reason,
+.parent-flag blockquote {
+  margin: 0;
+}
+
+.parent-flag blockquote {
+  padding-left: 10px;
+  border-left: 2px solid var(--fail);
+}
+
+.parent-danger {
+  justify-self: start;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  font: 600 13px/1 var(--sans);
+  color: var(--fail);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--fail);
+  border-radius: var(--radius);
+}

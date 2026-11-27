@@ -1,9 +1,9 @@
-import { Conversation } from "@elevenlabs/client";
 import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
 import type { SessionDeps, VoiceSession } from "./session";
+import { startConversation, type ElevenLabsConversation } from "./elevenLabsClient";
 
 export type AgentSessionDeps = SessionDeps;
 
@@ -25,7 +25,7 @@ const VAD_SPEECH = 0.5;
 const FROZEN_MS = 250;
 
 export class AgentSession implements VoiceSession {
-  private conversation: Awaited<ReturnType<typeof Conversation.startSession>> | null = null;
+  private conversation: ElevenLabsConversation | null = null;
   private running = false;
 
   /** When the current stage opened, so its duration can be reported on close. */
@@ -68,7 +68,7 @@ export class AgentSession implements VoiceSession {
   mouthSpectrum(): Uint8Array | null {
     if (!this.running || !this.speaking || !this.conversation) return null;
 
-    const spectrum = this.conversation.getOutputByteFrequencyData();
+    const spectrum = this.conversation.outputSpectrum();
     if (!spectrum) return null;
 
     // Cheap fingerprint over a stride: a real spectrum never repeats exactly for a
@@ -90,99 +90,98 @@ export class AgentSession implements VoiceSession {
     const { token } = await this.deps.transport.agentToken();
     this.resetTurn();
 
-    this.conversation = await Conversation.startSession({
-      conversationToken: token,
+    this.conversation = await startConversation({
+      token,
+      prompt: this.deps.prompt ?? SYSTEM_PROMPT,
+      callbacks: {
+        onModeChange: ({ mode }) => {
+          // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
+          // stage has to be bracketed from other events (see onMessage / onAudio).
+          const next: StageName | null = mode === "listening" ? "capture" : "playback";
+          this.speaking = mode === "speaking";
+          if (mode !== "speaking") this.closeLane("tts", performance.now());
+          this.openStage(next);
+        },
 
-      // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
-
-      onModeChange: ({ mode }) => {
-        // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
-        // stage has to be bracketed from other events (see onMessage / onAudio).
-        const next: StageName | null = mode === "listening" ? "capture" : "playback";
-        this.speaking = mode === "speaking";
-        if (mode !== "speaking") this.closeLane("tts", performance.now());
-        this.openStage(next);
-      },
-
-      onVadScore: ({ vadScore }) => {
-        const at = performance.now();
-        this.deps.bus.emit({ type: "audio-level", rms: vadScore, at });
-        const speech = vadScore >= VAD_SPEECH;
-        if (speech && !this.vadOpen) {
-          this.vadOpen = true;
-          this.openLane("vad", at);
-        } else if (!speech && this.vadOpen) {
-          this.vadOpen = false;
-          this.closeLane("vad", at);
-        }
-      },
-
-      onAsrInitiationMetadata: () => {
-        this.openLane("stt", performance.now());
-      },
-
-      onMessage: ({ message, source }) => {
-        if (source === "user") {
+        onVadScore: ({ vadScore }) => {
           const at = performance.now();
-          this.closeLane("stt", at);
-          // Recognition is done, so the model is now working: the lane runs until audio
-          // starts coming back.
-          this.openLane("llm", at);
-          this.deps.bus.emit({
-            type: "stt-result",
-            result: { text: message, words: [] },
-          });
-          return;
-        }
+          this.deps.bus.emit({ type: "audio-level", rms: vadScore, at });
+          const speech = vadScore >= VAD_SPEECH;
+          if (speech && !this.vadOpen) {
+            this.vadOpen = true;
+            this.openLane("vad", at);
+          } else if (!speech && this.vadOpen) {
+            this.vadOpen = false;
+            this.closeLane("vad", at);
+          }
+        },
 
-        // `onAgentChatResponsePart` streams the reply earlier but is experimental and does
-        // not always fire, so this is the source of record.
-        this.metrics.ttsChars += message.length;
-        if (this.streamedReply.trim() === message.trim()) {
+        onAsrInitiationMetadata: () => {
+          this.openLane("stt", performance.now());
+        },
+
+        onMessage: ({ message, source }) => {
+          if (source === "user") {
+            const at = performance.now();
+            this.closeLane("stt", at);
+            // Recognition is done, so the model is now working: the lane runs until audio
+            // starts coming back.
+            this.openLane("llm", at);
+            this.deps.bus.emit({
+              type: "stt-result",
+              result: { text: message, words: [] },
+            });
+            return;
+          }
+
+          // `onAgentChatResponsePart` streams the reply earlier but is experimental and does
+          // not always fire, so this is the source of record.
+          this.metrics.ttsChars += message.length;
+          if (this.streamedReply.trim() === message.trim()) {
+            this.streamedReply = "";
+            return;
+          }
           this.streamedReply = "";
-          return;
-        }
-        this.streamedReply = "";
-        this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
-      },
+          this.deps.bus.emit({ type: "agent-reply", text: message, at: performance.now() });
+        },
 
-      onAgentChatResponsePart: (part) => {
-        const text = part?.text ?? "";
-        if (!text) return;
-        this.streamedReply += text;
-        this.metrics.llmTokens += 1;
-        this.deps.bus.emit({ type: "llm-token", token: text, at: performance.now() });
-      },
+        onAgentChatResponsePart: (part) => {
+          const text = part?.text ?? "";
+          if (!text) return;
+          this.streamedReply += text;
+          this.metrics.llmTokens += 1;
+          this.deps.bus.emit({ type: "llm-token", token: text, at: performance.now() });
+        },
 
-      onAudio: () => {
-        const at = performance.now();
-        this.closeLane("llm", at);
-        this.openLane("tts", at);
-      },
+        onAudio: () => {
+          const at = performance.now();
+          this.closeLane("llm", at);
+          this.openLane("tts", at);
+        },
 
-      onDisconnect: (details) => {
-        this.running = false;
-        // The mouth reads through `conversation`, and the SDK keeps answering after
-        // the socket closes — with the last thing it played. Dropping the handle
-        // here, as `stop()` already did, is what makes a dropped connection close
-        // the mouth instead of freezing it mid-word.
-        this.conversation = null;
-        this.speaking = false;
-        this.closeAllLanes(performance.now());
-        this.deps.onEnded(
-          details.reason,
-          details.reason === "error" ? details.message : undefined,
-        );
-      },
+        onDisconnect: (details) => {
+          this.running = false;
+          // The mouth reads through `conversation`, and the SDK keeps answering after
+          // the socket closes — with the last thing it played. Dropping the handle
+          // here, as `stop()` already did, is what makes a dropped connection close
+          // the mouth instead of freezing it mid-word.
+          this.conversation = null;
+          this.speaking = false;
+          this.closeAllLanes(performance.now());
+          this.deps.onEnded(
+            details.reason,
+            details.reason === "error" ? details.message : undefined,
+          );
+        },
 
-      onError: (message) => {
-        this.deps.bus.emit({
-          type: "stage-error",
-          stage: this.stage ?? "stt",
-          at: performance.now(),
-          message,
-        });
+        onError: (message) => {
+          this.deps.bus.emit({
+            type: "stage-error",
+            stage: this.stage ?? "stt",
+            at: performance.now(),
+            message,
+          });
+        },
       },
     });
 
@@ -255,6 +254,6 @@ export class AgentSession implements VoiceSession {
     this.closeAllLanes(performance.now());
     const conversation = this.conversation;
     this.conversation = null;
-    await conversation?.endSession().catch(() => undefined);
+    await conversation?.end().catch(() => undefined);
   }
 }

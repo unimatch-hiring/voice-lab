@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Admin } from "./Admin";
 import { LipSyncBench } from "./bench/LipSyncBench";
+import { Parent } from "./Parent";
 import { pickRoute } from "./lib/route";
 
 // Set by the preview workflows. A convenience only: a pull request can rewrite this file,
@@ -13,6 +14,7 @@ const pages = {
   admin: () => <Admin />,
   "admin-unavailable": () => <p>The admin page is not available in a preview.</p>,
   bench: () => <LipSyncBench />,
+  parent: () => <Parent />,
 };
 
 createRoot(document.getElementById("root")!).render(pages[pickRoute(location.search, preview)]());

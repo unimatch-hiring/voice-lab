@@ -52,11 +52,74 @@ and why that is safe: [docs/deploy.md](docs/deploy.md#fork-previews). Previews a
 from another account's Pages, so unreviewed code never shares an origin with the admin
 page: [docs/deploy.md](docs/deploy.md#where-previews-live).
 
+## Parental control
+
+The assistant is set up for a child, with a separate page for the parent at `?parent`
+(linked from the assistant as "For parents", no access control by design).
+
+**What the parent sets** — four free-form fields, stored on our server:
+
+- topics the child may discuss — the agent keeps to them, answering anything else only
+  briefly and only if it is harmless
+- topics the child must not discuss — the agent changes the subject without explaining why
+- about the child — name, age, interests, how to talk to them
+- what worries you — handed to the alarm review as a hint, never to the agent
+
+**How it reaches the conversation.** Before every start the page reads the settings and
+builds the agent's prompt from them (`src/lib/parental/childPrompt.ts`), sent as an override
+through `src/lib/pipeline/elevenLabsClient.ts`. ElevenLabs applies the override only when a
+session opens, so a change takes effect from the next conversation. Without the settings the
+conversation does not start.
+
+**Red flags.** Every child message is reviewed by an LLM — no keyword filter in front of it:
+
+1. When the agent has finished answering, the page sends the child's message, the three
+   lines before it and the agent's answer to `POST /api/flags/review`. The conversation is
+   never held up or changed; the agent answers as usual.
+2. The server asks the model (OpenRouter, `typesafe/jev-router`) whether the child may be
+   at risk: self-harm, abuse, neglect, violence, sexual content, bullying, other danger. The
+   model judges the latest message only; the earlier lines are there to explain it, so one
+   alarm does not flag every harmless line after it.
+3. A concern is stored with the full message, the context, the agent's answer, a category,
+   a severity and a one-line reason. A harmless message is not stored. If the review fails
+   (no key, timeout, bad answer) the message is stored as "not verified": a missed risk costs
+   more than a false alarm.
+4. The parent page lists the flags, newest first.
+
+**Conversation log.** Every line of the conversation, the child's and the agent's, is
+written to the server (`GET /api/transcript`). Every review decision is logged to the
+server's console.
+
+**Deleting the child's data.** One button, after a confirmation, deletes the conversation
+log, every flag and the "about the child" field. The topics and "what worries you" stay.
+
+### Running it locally
+
+```sh
+cp server/.env.example server/.env   # put the OpenRouter key in
+npm run server                       # http://localhost:8790, data in server/data/db.json
+npm run dev                          # proxies /api to the server
+npm run eval:flags                   # the alarm review against the real model, ~10 s
+```
+
+The server is local only: GitHub Pages serves static files, so on the published site the
+parent page reports the server as unreachable and the conversation does not start.
+
+| Route | |
+|---|---|
+| `GET` / `PUT /api/settings` | the parent's four fields |
+| `POST /api/flags/review` | `{text, context[≤3], agentReply?}` → `{flagged, flag?}` |
+| `GET /api/flags` | stored flags, newest first |
+| `POST` / `GET /api/transcript` | the conversation log |
+| `DELETE /api/child-data` | log, flags and profile |
+
 ## How it fits together
 
+- `src/lib/parental/` — parental control on the client: prompt, review reporter, log, API
+- `server/` — parental server: JSON store, service, LLM review, HTTP routes
 - `src/lib/pipeline/` — the conversation and the stage stream it emits
 - `src/lib/` — transport, config, token storage, the mouth's signal path
-- `src/lib/persona.ts` — the agent's role, sent as an override when the session opens
+- `src/lib/persona.ts` — the default role, used only when no child prompt is passed
 - `src/scene/` — the scene; reads the event stream only and knows nothing about the pipeline
 - `worker/` — Cloudflare Worker minting short-lived tokens (no audio flows through it)
 - `tools/` — sprite builder for the character

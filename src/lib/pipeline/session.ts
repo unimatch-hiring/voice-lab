@@ -15,6 +15,8 @@ export interface SessionDeps {
    * decided it was done, or the connection failed.
    */
   onEnded: (reason: "user" | "agent" | "error", message?: string) => void;
+  /** The agent's role for this conversation; the default persona when absent. */
+  prompt?: string;
 }
 
 /** What the page drives, whichever engine is underneath. */
