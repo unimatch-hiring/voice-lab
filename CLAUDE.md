@@ -38,6 +38,7 @@ Read the doc for the area you are touching before you touch it.
 | | |
 |---|---|
 | [docs/conventions.md](docs/conventions.md) | how we write code here — **read first** |
+| [docs/new-expert.md](docs/new-expert.md) | rolling out a new expert: roadmap, what admins can fix |
 | [docs/pipeline.md](docs/pipeline.md) | stage mapping, turn boundaries, why not our own pipeline |
 | [docs/mouth.md](docs/mouth.md) | lip sync: amplitude source, invariants, sprites |
 | [docs/deploy.md](docs/deploy.md) | Pages, Worker, secrets |
