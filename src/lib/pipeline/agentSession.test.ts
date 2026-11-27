@@ -9,6 +9,8 @@ import { TurnModel } from "../../scene/turnModel";
 const handlers: Record<string, (arg?: unknown) => void> = {};
 /** What the session asked the SDK for, so the handshake itself can be asserted on. */
 let startOptions: Record<string, unknown> = {};
+/** What the session pushed into the live conversation after the handshake. */
+const sent: [string, string][] = [];
 
 vi.mock("@elevenlabs/client", () => ({
   Conversation: {
@@ -19,6 +21,8 @@ vi.mock("@elevenlabs/client", () => ({
       }
       return {
         endSession: async () => {},
+        sendContextualUpdate: (text: string) => sent.push(["context", text]),
+        sendUserMessage: (text: string) => sent.push(["user", text]),
         getOutputVolume: () => 0,
         getOutputByteFrequencyData: () => new Uint8Array(1024),
       };
@@ -28,7 +32,7 @@ vi.mock("@elevenlabs/client", () => ({
 
 afterEach(() => vi.restoreAllMocks());
 
-async function harness() {
+async function harness(briefing?: () => string) {
   const bus = new EventBus();
   const events: PipelineEvent[] = [];
   bus.on((e) => events.push(e));
@@ -40,6 +44,7 @@ async function harness() {
     transport: { agentToken: async () => ({ token: "t", agentId: "a" }) } as never,
     onTurn: (m) => turns.push(m),
     onEnded: () => {},
+    briefing,
   });
 
   await session.start();
@@ -102,6 +107,14 @@ test("the role is sent with the handshake, not left to the agent's own prompt", 
   expect(overrides?.agent?.prompt?.prompt).toBe(SYSTEM_PROMPT);
 });
 
+test("what is on file about the customer rides in the prompt, so the greeting already knows them", async () => {
+  await harness(() => "Returning customer: Анна");
+
+  const prompt = (startOptions.overrides as { agent: { prompt: { prompt: string } } }).agent.prompt.prompt;
+  expect(prompt.startsWith(SYSTEM_PROMPT)).toBe(true);
+  expect(prompt).toContain("Returning customer: Анна");
+});
+
 test("the token counter starts over on every turn instead of growing for the whole call", async () => {
   const { events } = await harness();
   const say = (text: string) => handlers.onAgentChatResponsePart?.({ text } as never);
@@ -136,4 +149,31 @@ test("end to end is the turn's wall-clock time, not the sum of overlapping stage
   at(2000, () => handlers.onModeChange?.({ mode: "listening" } as never));
 
   expect(turns[0].totalMs).toBe(2000);
+});
+
+test("context and typed turns go through the SDK's own methods, each to its own", async () => {
+  sent.length = 0;
+  const { session } = await harness();
+
+  session.sendContextualUpdate("Customer name: Anna.");
+  session.sendUserMessage("Book me for tomorrow.");
+
+  expect(sent).toEqual([
+    ["context", "Customer name: Anna."],
+    ["user", "Book me for tomorrow."],
+  ]);
+});
+
+test("the page's tools are handed to the SDK as client tools, by name", async () => {
+  const session = new AgentSession({
+    bus: new EventBus(),
+    transport: { agentToken: async () => ({ token: "t", agentId: "a" }) } as never,
+    onTurn: () => {},
+    onEnded: () => {},
+    functions: [{ name: "update_form", description: "", parameters: {}, run: () => "filled" }],
+  });
+  await session.start();
+
+  const tools = startOptions.clientTools as Record<string, (a: unknown) => string>;
+  expect(tools.update_form({})).toBe("filled");
 });

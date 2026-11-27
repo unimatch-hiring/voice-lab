@@ -1,9 +1,9 @@
 import { Desmoother } from "../mouthLevel";
-import { SYSTEM_PROMPT } from "../persona";
+import { DEEPGRAM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
 import { createBrowserAudio, OUTPUT_RATE, type DeepgramAudio } from "./deepgramAudio";
-import type { SessionDeps, VoiceSession } from "./session";
+import { withBriefing, type SessionDeps, type VoiceSession } from "./session";
 
 /**
  * The same session contract on Deepgram's Voice Agent API: one WebSocket carries
@@ -12,20 +12,11 @@ import type { SessionDeps, VoiceSession } from "./session";
  */
 export const DEEPGRAM_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse";
 
-/** A function the agent may call; it runs here in the page, not on Deepgram's side. */
-export interface ClientFunction {
-  name: string;
-  description: string;
-  /** JSON Schema of the arguments. */
-  parameters: Record<string, unknown>;
-  /** The result goes back to the model as text. */
-  run(args: Record<string, unknown>): string | Promise<string>;
-}
+export type { ClientFunction } from "./session";
 
 export type InjectBehavior = "default" | "queue" | "interrupt";
 
 export interface DeepgramSessionDeps extends SessionDeps {
-  functions?: ClientFunction[];
   /** Audio hardware; replaced in tests. */
   audio?: () => DeepgramAudio;
 }
@@ -111,8 +102,14 @@ export class DeepgramSession implements VoiceSession {
     this.running = true;
   }
 
+  // No contextual update in Deepgram; UpdatePrompt adds to the prompt rather than replacing it.
+  // https://developers.deepgram.com/docs/voice-agent-update-prompt
+  sendContextualUpdate(text: string): void {
+    this.send({ type: "UpdatePrompt", prompt: text });
+  }
+
   /** InjectUserMessage. */
-  sendText(text: string): void {
+  sendUserMessage(text: string): void {
     this.send({ type: "InjectUserMessage", content: text });
   }
 
@@ -184,7 +181,7 @@ export class DeepgramSession implements VoiceSession {
         listen: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.listen, language: "en" } },
         think: {
           provider: { type: "open_ai", model: DEEPGRAM_MODELS.think },
-          prompt: SYSTEM_PROMPT,
+          prompt: withBriefing(DEEPGRAM_PROMPT, this.deps.briefing?.()),
           ...(functions?.length ? { functions } : {}),
         },
         speak: { provider: { type: "deepgram", model: DEEPGRAM_MODELS.speak } },

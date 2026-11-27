@@ -6,6 +6,8 @@ import { WorkerError } from "./lib/transport";
 // jsdom has no IndexedDB, so the store is faked.
 let stored = "";
 vi.mock("./lib/tokenStore", () => ({
+  loadProfile: () => new Promise(() => {}),
+  saveProfile: () => Promise.resolve(),
   loadToken: () => Promise.resolve(stored),
   saveToken: (t: string) => {
     stored = t;

@@ -3,7 +3,7 @@ import { Desmoother } from "../mouthLevel";
 import { SYSTEM_PROMPT } from "../persona";
 import { coveredMs } from "../coverage";
 import type { StageName, TurnMetrics } from "../types";
-import type { SessionDeps, VoiceSession } from "./session";
+import { withBriefing, type SessionDeps, type VoiceSession } from "./session";
 
 export type AgentSessionDeps = SessionDeps;
 
@@ -94,7 +94,9 @@ export class AgentSession implements VoiceSession {
       conversationToken: token,
 
       // The role travels with the handshake: the server applies it only at start.
-      overrides: { agent: { prompt: { prompt: SYSTEM_PROMPT } } },
+      overrides: { agent: { prompt: { prompt: withBriefing(SYSTEM_PROMPT, this.deps.briefing?.()) } } },
+      // Only the handlers travel from here: each tool must also be declared on the agent.
+      clientTools: Object.fromEntries((this.deps.functions ?? []).map((f) => [f.name, f.run])),
 
       onModeChange: ({ mode }) => {
         // `Mode` is only "speaking" | "listening" — there is no third value, so the model's
@@ -247,6 +249,14 @@ export class AgentSession implements VoiceSession {
     this.intervals = [];
     this.lanes.clear();
     this.vadOpen = false;
+  }
+
+  sendContextualUpdate(text: string): void {
+    this.conversation?.sendContextualUpdate(text);
+  }
+
+  sendUserMessage(text: string): void {
+    this.conversation?.sendUserMessage(text);
   }
 
   async stop(): Promise<void> {

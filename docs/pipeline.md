@@ -80,7 +80,8 @@ What differs, and why the page says so:
 - The role, the models and the functions go in `Settings`. Functions run in the page:
   `FunctionCallRequest` → `FunctionCallResponse` with the same `id`, and nothing for a
   call named in `FunctionCallCancelled`.
-- `sendText` and `injectAgentMessage` map to `InjectUserMessage` and `InjectAgentMessage`.
+- `sendUserMessage`, `sendContextualUpdate` and `injectAgentMessage` map to `InjectUserMessage`,
+  `UpdatePrompt` (appends, never replaces) and `InjectAgentMessage`.
 - `UserStartedSpeaking` is the barge-in signal: queued agent audio is dropped. A reply ends
   when local playback drains, not at `AgentAudioDone`, which only means the last chunk left
   the server.
