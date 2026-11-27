@@ -31,6 +31,20 @@ a rebuild. For local runs a build-time variable also works:
 VITE_VIBE_TOKEN=<token> npm run dev
 ```
 
+### Parent control server
+
+Use Node.js 24 and run these commands from the checkout root.
+
+```sh
+npm --prefix server ci
+npm --prefix server run db:init
+npm --prefix server start
+```
+
+The init command creates `server/.data/voice-lab.sqlite`. The server runs the same
+initialization on startup and listens on `http://127.0.0.1:8788` by default. See the
+[server README](server/README.md) for `DATABASE_PATH` and other settings.
+
 ## Looking at a branch
 
 Push it. Every branch but `main` is published under its own path, so a change can be

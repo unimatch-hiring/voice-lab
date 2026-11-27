@@ -5,6 +5,9 @@ import react from "@vitejs/plugin-react";
 // level deeper, so the path comes from the build rather than being fixed here.
 export default defineConfig({
   base: process.env.BASE_PATH ?? "/voice-lab/",
+  server: {
+    fs: { deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "**/server/**"] },
+  },
   plugins: [react()],
   // An agent harness can put a worktree — with its own copy of every test — inside the
   // repo. Without this the suite collects those too and reports failures nobody wrote.
